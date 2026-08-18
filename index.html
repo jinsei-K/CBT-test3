@@ -6,6 +6,8 @@
   <title>高度CBTテストシステム</title>
   <!-- Chart.js ライブラリ -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <!-- QRコード生成ライブラリを追加 -->
+  <script src="https://cdnjs.cloudflare.net/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
   <style>
     :root {
       --primary: #2563eb;
@@ -123,6 +125,7 @@
       text-align: left;
     }
     th { background: #f1f5f9; }
+    .qr-container { margin-top: 10px; padding: 10px; background: white; display: inline-block; border: 1px solid var(--border); }
   </style>
 </head>
 <body>
@@ -246,7 +249,7 @@
     <!-- タブ2: テスト一覧・配布リンク生成 -->
     <div id="tab-tests" class="admin-tab hidden">
       <h3>発行済みテスト一覧</h3>
-      <p style="color:#666; font-size:0.9em;">※ 各テストごとに教科・試験用の個別URLが生成されます。</p>
+      <p style="color:#666; font-size:0.9em;">※ 各テストごとに教科・試験用の個別URLおよびQRコードが生成されます。</p>
       <div id="test-list"></div>
     </div>
 
@@ -273,8 +276,15 @@
           <canvas id="scoreChart"></canvas>
         </div>
 
-        <h4>生徒別成績・解答明細</h4>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-top: 30px;">
+          <h4>生徒別成績・解答明細</h4>
+          <button class="btn btn-danger" onclick="resetTestResults()">このテストの成績をリセット</button>
+        </div>
         <div id="student-results-table"></div>
+
+        <!-- リセットログ表示エリア -->
+        <h4 style="margin-top: 40px;">成績リセット履歴（ログ）</h4>
+        <div id="reset-log-table"></div>
       </div>
     </div>
 
@@ -335,6 +345,7 @@ function initDB() {
       if (!d.objectStoreNames.contains('admins')) d.createObjectStore('admins', { keyPath: 'user' });
       if (!d.objectStoreNames.contains('tests')) d.createObjectStore('tests', { keyPath: 'id' });
       if (!d.objectStoreNames.contains('answers')) d.createObjectStore('answers', { keyPath: 'id', autoIncrement: true });
+      if (!d.objectStoreNames.contains('reset_logs')) d.createObjectStore('reset_logs', { keyPath: 'id', autoIncrement: true });
     };
     req.onsuccess = (e) => {
       db = e.target.result;
@@ -390,7 +401,7 @@ function dbDelete(storeName, key) {
 /* ===================================================
    2. アプリケーション状態・セッション管理
 =================================================== */
-let currentUser = null; // { user, role }
+let currentUser = null;
 let currentTest = null;
 let tempQuestions = [];
 let violationCount = 0;
@@ -399,12 +410,10 @@ let currentChart = null;
 window.addEventListener('DOMContentLoaded', async () => {
   await initDB();
 
-  // 1) 生徒用サイトと管理者サイトの自動切り分け
   const urlParams = new URLSearchParams(window.location.search);
   const testId = urlParams.get('testId');
 
   if (testId) {
-    // 問題解く用画面を直接表示
     document.getElementById('view-admin-login').classList.add('hidden');
     document.getElementById('view-student').classList.remove('hidden');
     loadStudentTest(testId);
@@ -413,7 +422,7 @@ window.addEventListener('DOMContentLoaded', async () => {
 });
 
 /* ===================================================
-   3. 不正防止・検知機能（タブ切り替え・フォーカス外れ）
+   3. 不正防止・検知機能
 =================================================== */
 function setupProctoredEvents() {
   const triggerViolation = () => {
@@ -423,17 +432,15 @@ function setupProctoredEvents() {
     document.getElementById('violation-warning').classList.remove('hidden');
   };
 
-  // 1. タブ切り替え / 最小化検知
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) triggerViolation();
   });
 
-  // 2. 別ウィンドウ・別アプリへの切り替え検知
   window.addEventListener('blur', triggerViolation);
 }
 
 /* ===================================================
-   4. 生徒用機能 (テスト解答・シャッフル・自動保存)
+   4. 生徒用機能
 =================================================== */
 async function loadStudentTest(testId) {
   currentTest = await dbGet('tests', testId);
@@ -456,7 +463,6 @@ function startExam() {
   document.getElementById('student-exam').classList.remove('hidden');
   document.getElementById('exam-header').innerText = currentTest.title;
 
-  // 問題データと選択肢のランダム表示（元のデータを破壊しないようディープコピー）
   const questions = JSON.parse(JSON.stringify(currentTest.questions));
   questions.forEach(q => {
     if (q.options && q.options.length > 0) {
@@ -500,7 +506,7 @@ function renderExamForm(questions) {
     form.appendChild(card);
   });
 }
-// GASで発行されたウェブアプリURLを設定
+
 const GAS_URL = "https://script.google.com/macros/s/AKfycbxaKWC_EyqAbniAzeFxUffCmzcFexO9HcMLfe76Rsv-uEfBenqJ9ifKXoPvRvftKfrR/exec";
 
 async function submitExam() {
@@ -538,7 +544,6 @@ async function submitExam() {
     submittedAt: new Date().toLocaleString()
   };
 
-  // GAS（Googleスプレッドシート）へデータ送信
   try {
     await fetch(GAS_URL, {
       method: 'POST',
@@ -548,21 +553,12 @@ async function submitExam() {
     console.error('送信エラー:', err);
   }
 
-  // ローカル（IndexedDB）にもバックアップとして保存
   await dbPut('answers', record);
 
   document.getElementById('student-exam').classList.add('hidden');
   document.getElementById('student-complete').classList.remove('hidden');
 }
-// 試験開始時に全画面表示を強制する処理
-function requestFullScreen() {
-  const elem = document.documentElement;
-  if (elem.requestFullscreen) {
-    elem.requestFullscreen();
-  }
-}
 
-// 右クリック・コピー・ペーストの禁止
 document.addEventListener('contextmenu', e => e.preventDefault());
 document.addEventListener('copy', e => e.preventDefault());
 document.addEventListener('paste', e => e.preventDefault());
@@ -580,7 +576,6 @@ async function loginAdmin() {
     document.getElementById('view-admin-login').classList.add('hidden');
     document.getElementById('view-admin-dashboard').classList.remove('hidden');
     
-    // UI権限表示の更新
     document.getElementById('current-user-display').innerText = `ログイン中: ${account.user}`;
     const badge = document.getElementById('user-role-badge');
     if (account.role === 'super') {
@@ -706,11 +701,11 @@ async function saveTest() {
 }
 
 /* ===================================================
-   7. テスト一覧 & 配布リンク生成
+   7. テスト一覧 & 配布リンク生成（QRコード生成 & 削除対応）
 =================================================== */
 async function loadTestList() {
   const allTests = await dbGetAll('tests');
-  // 教員アカウントは自身が作成したもの、おおもと管理者は全テストを表示
+  // super権限（admin）は全テストを表示し、教員は自分の作成したテストを表示
   const tests = currentUser.role === 'super' ? allTests : allTests.filter(t => t.createdBy === currentUser.user);
 
   const container = document.getElementById('test-list');
@@ -723,34 +718,79 @@ async function loadTestList() {
 
   container.innerHTML = tests.map(t => {
     const studentUrl = `${baseUrl}?testId=${t.id}`;
+    const inputId = `link-input-${t.id}`;
+    const qrId = `qr-${t.id}`;
     return `
       <div class="card">
         <h4>${t.title} <small style="font-weight:normal; color:#666;">(問題数: ${t.questions.length} / 作成者: ${t.createdBy})</small></h4>
         <p><strong>【教員配布用】教科個別テストリンク:</strong></p>
-        <input type="text" value="${studentUrl}" readonly onclick="this.select()">
-        <br>
-        <button class="btn btn-danger" onclick="deleteTest('${t.id}')">このテストを削除</button>
+        <div style="display: flex; gap: 8px; margin-bottom: 8px;">
+          <input type="text" id="${inputId}" value="${studentUrl}" readonly onclick="this.select()" style="margin: 0;">
+          <button class="btn" style="white-space: nowrap;" onclick="copyTestLink('${inputId}')">URLをコピー</button>
+        </div>
+        <div>
+          <strong>QRコード:</strong><br>
+          <div id="${qrId}" class="qr-container"></div>
+        </div>
+        <button class="btn btn-danger" style="margin-top:10px;" onclick="deleteTest('${t.id}')">このテストを削除</button>
       </div>
     `;
   }).join('');
+
+  // 各テストのQRコード生成
+  tests.forEach(t => {
+    const studentUrl = `${baseUrl}?testId=${t.id}`;
+    const qrContainer = document.getElementById(`qr-${t.id}`);
+    if (qrContainer) {
+      qrContainer.innerHTML = '';
+      new QRCode(qrContainer, {
+        text: studentUrl,
+        width: 128,
+        height: 128
+      });
+    }
+  });
 }
 
-async function deleteTest(id) {
-  if (!confirm('このテストを削除してもよろしいですか？')) return;
-  await dbDelete('tests', id);
+// 追加: テスト削除機能の完全実装
+async function deleteTest(testId) {
+  if (!confirm('このテストを削除しますか？\n（※関連するテスト設定が削除されます）')) return;
+  await dbDelete('tests', testId);
   loadTestList();
+  loadResultTestOptions();
+}
+
+function copyTestLink(inputId) {
+  const inputElem = document.getElementById(inputId);
+  inputElem.select();
+  inputElem.setSelectionRange(0, 99999);
+
+  navigator.clipboard.writeText(inputElem.value).then(() => {
+    alert('テストリンクをクリップボードにコピーしました！');
+  }).catch(err => {
+    document.execCommand('copy');
+    alert('テストリンクをコピーしました！');
+  });
 }
 
 /* ===================================================
-   8. 成績集計・結果分析 (グラフ描画)
+   8. 成績集計・結果分析 (エラー防止 & 画面即時更新)
 =================================================== */
 async function loadResultTestOptions() {
   const allTests = await dbGetAll('tests');
   const tests = currentUser.role === 'super' ? allTests : allTests.filter(t => t.createdBy === currentUser.user);
   
   const select = document.getElementById('result-test-select');
+  const currentVal = select.value;
+  
   select.innerHTML = '<option value="">-- テストを選択してください --</option>' + 
     tests.map(t => `<option value="${t.id}">${t.title} (${t.createdBy})</option>`).join('');
+  
+  if (tests.some(t => t.id === currentVal)) {
+    select.value = currentVal;
+  } else {
+    document.getElementById('analytics-area').classList.add('hidden');
+  }
 }
 
 async function renderResults() {
@@ -766,64 +806,100 @@ async function renderResults() {
   const allAnswers = await dbGetAll('answers');
   const results = allAnswers.filter(a => a.testId === testId);
 
-  // 統計数値の算出
   const count = results.length;
-  const avg = count ? (results.reduce((acc, r) => acc + r.score, 0) / count).toFixed(1) : 0;
+  const avg = count ? (results.reduce((acc, r) => acc + (r.score || 0), 0) / count).toFixed(1) : 0;
 
   document.getElementById('stat-count').innerText = count;
   document.getElementById('stat-avg').innerText = avg;
 
-  // グラフ（得点分布）
   const scoreCounts = {};
   results.forEach(r => {
-    scoreCounts[r.score] = (scoreCounts[r.score] || 0) + 1;
+    const s = r.score || 0;
+    scoreCounts[s] = (scoreCounts[s] || 0) + 1;
   });
 
-  const ctx = document.getElementById('scoreChart').getContext('2d');
-  if (currentChart) currentChart.destroy();
-
-  currentChart = new Chart(ctx, {
-    type: 'bar',
-    data: {
-      labels: Object.keys(scoreCounts).map(s => `${s}点`),
-      datasets: [{
-        label: '人数',
-        data: Object.values(scoreCounts),
-        backgroundColor: '#2563eb'
-      }]
-    },
-    options: {
-      responsive: true,
-      scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } }
+  const canvas = document.getElementById('scoreChart');
+  if (canvas) {
+    const ctx = canvas.getContext('2d');
+    if (currentChart) {
+      currentChart.destroy();
     }
-  });
 
-  // 生徒一覧表
+    currentChart = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: Object.keys(scoreCounts).map(s => `${s}点`),
+        datasets: [{
+          label: '人数',
+          data: Object.values(scoreCounts),
+          backgroundColor: '#2563eb'
+        }]
+      },
+      options: {
+        responsive: true,
+        scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } }
+      }
+    });
+  }
+
   const tableContainer = document.getElementById('student-results-table');
   if (results.length === 0) {
     tableContainer.innerHTML = '<p>まだ回答データがありません。</p>';
+  } else {
+    tableContainer.innerHTML = `
+      <table>
+        <thead>
+          <tr>
+            <th>学年・クラス・番号</th>
+            <th>氏名</th>
+            <th>得点</th>
+            <th>不正検知回数</th>
+            <th>提出日時</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${results.map(r => `
+            <tr>
+              <td>${r.studentClass || ''}</td>
+              <td>${r.studentName || ''}</td>
+              <td><strong>${r.score || 0}</strong> / ${r.maxScore || 0}</td>
+              <td style="${r.violations > 0 ? 'color:var(--danger); font-weight:bold;' : ''}">${r.violations || 0} 回</td>
+              <td>${r.submittedAt || ''}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    `;
+  }
+
+  await renderResetLogs(testId);
+}
+
+async function renderResetLogs(testId) {
+  const allLogs = await dbGetAll('reset_logs');
+  const testLogs = allLogs.filter(l => l.testId === testId);
+  const logContainer = document.getElementById('reset-log-table');
+
+  if (testLogs.length === 0) {
+    logContainer.innerHTML = '<p style="color:#666; font-size:0.9em;">このテストの成績リセット履歴はありません。</p>';
     return;
   }
 
-  tableContainer.innerHTML = `
+  logContainer.innerHTML = `
     <table>
       <thead>
         <tr>
-          <th>学年・クラス・番号</th>
-          <th>氏名</th>
-          <th>得点</th>
-          <th>不正検知回数</th>
-          <th>提出日時</th>
+          <th>実行日時</th>
+          <th>実行ユーザー</th>
+          <th>削除されたデータ件数</th>
         </tr>
       </thead>
       <tbody>
-        ${results.map(r => `
+        ${testLogs.reverse().map(l => `
           <tr>
-            <td>${r.studentClass}</td>
-            <td>${r.studentName}</td>
-            <td><strong>${r.score}</strong> / ${r.maxScore}</td>
-            <td style="${r.violations > 0 ? 'color:var(--danger); font-weight:bold;' : ''}">${r.violations} 回</td>
-            <td>${r.submittedAt}</td>
+            <td>${l.timestamp}</td>
+            <td>${l.executedBy}</td>
+            <td>${l.deletedCount} 件</td>
           </tr>
         `).join('')}
       </tbody>
@@ -831,11 +907,50 @@ async function renderResults() {
   `;
 }
 
-/* ===================================================
-   教員アカウント管理（おおもと管理者専用）
-=================================================== */
+async function resetTestResults() {
+  const testId = document.getElementById('result-test-select').value;
+  if (!testId) return;
 
-// 1. 新規教員アカウントの作成
+  const test = await dbGet('tests', testId);
+  const allAnswers = await dbGetAll('answers');
+  const targetAnswers = allAnswers.filter(a => a.testId === testId);
+
+  if (targetAnswers.length === 0) {
+    alert('削除対象の成績データがありません。');
+    return;
+  }
+
+  const confirm1 = confirm(`【警告】テスト「${test ? test.title : ''}」の成績データ (${targetAnswers.length}件) をすべて消去しますか？\nこの操作は取り消せません。`);
+  if (!confirm1) return;
+
+  const confirm2 = prompt(`本当に削除する場合は「削除」と入力してください。`);
+  if (confirm2 !== '削除') {
+    alert('入力が一致しないため、リセット処理をキャンセルしました。');
+    return;
+  }
+
+  for (const ans of targetAnswers) {
+    await dbDelete('answers', ans.id);
+  }
+
+  const logData = {
+    testId: testId,
+    testTitle: test ? test.title : '',
+    executedBy: currentUser ? currentUser.user : '不明',
+    deletedCount: targetAnswers.length,
+    timestamp: new Date().toLocaleString()
+  };
+  await dbPut('reset_logs', logData);
+
+  alert('成績データをリセットし、ログを記録しました。');
+
+  // リロードせずリアルタイム更新
+  renderResults();
+}
+
+/* ===================================================
+   9. 教員アカウント管理
+=================================================== */
 async function createTeacherAccount() {
   const u = document.getElementById('new-teacher-id').value.trim();
   const p = document.getElementById('new-teacher-pass').value.trim();
@@ -845,25 +960,21 @@ async function createTeacherAccount() {
     return;
   }
 
-  // 既存のアカウントとの重複チェック
   const existing = await dbGet('admins', u);
   if (existing) {
     alert('そのユーザーIDは既に使用されています。別のIDを指定してください。');
     return;
   }
 
-  // IndexedDBの'admins'ストアに教員権限(role: 'teacher')で保存
   await dbPut('admins', { user: u, pass: p, role: 'teacher' });
   alert(`教員アカウント [${u}] を正常に作成しました。`);
   
   document.getElementById('new-teacher-id').value = '';
   document.getElementById('new-teacher-pass').value = '';
   
-  // 一覧表示を更新
   loadTeacherAccounts();
 }
 
-// 2. 登録済み教員アカウント一覧の読み込み・表示
 async function loadTeacherAccounts() {
   const admins = await dbGetAll('admins');
   const teachers = admins.filter(a => a.role === 'teacher');
@@ -884,12 +995,12 @@ async function loadTeacherAccounts() {
   `).join('');
 }
 
-// 3. 教員アカウントの削除
 async function deleteTeacher(user) {
   if (!confirm(`教員アカウント [${user}] を削除しますか？`)) return;
   await dbDelete('admins', user);
   loadTeacherAccounts();
 }
+
 /* ===================================================
    10. パスワード変更 & 全データ初期化
 =================================================== */
