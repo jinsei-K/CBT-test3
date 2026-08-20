@@ -317,10 +317,17 @@
 
       <hr style="margin: 30px 0;">
 
+      <!-- 修正後: タブ5 のデータ管理部分 -->
       <h3>データ管理・初期化</h3>
       <div class="card" style="border-color: var(--danger);">
         <h4 style="color:var(--danger);">システムデータのリセット</h4>
         <p style="font-size:0.9em; color:#666;">すべてのテストデータ、問題データ、解答レコード、追加アカウントを削除し初期状態に戻します。</p>
+        
+        <!-- 前回リセット日時の表示エリアを追加 -->
+        <p style="font-size:0.9em; font-weight:bold; color:var(--text);">
+          前回システムリセット日時: <span id="last-system-reset-time">なし</span>
+        </p>
+
         <button class="btn btn-danger" onclick="resetAllData()">全データをリセットする</button>
       </div>
     </div>
@@ -605,6 +612,12 @@ function showTab(tabId) {
   if (tabId === 'tab-tests') loadTestList();
   if (tabId === 'tab-results') loadResultTestOptions();
   if (tabId === 'tab-accounts') loadTeacherAccounts();
+  
+  // 追加: 設定タブを開いたときに前回リセット日時を表示
+  if (tabId === 'tab-settings') {
+    const lastReset = localStorage.getItem('last_system_reset_time');
+    document.getElementById('last-system-reset-time').innerText = lastReset ? lastReset : '記録なし';
+  }
 }
 
 function toggleOptionsInput() {
@@ -705,7 +718,6 @@ async function saveTest() {
 =================================================== */
 async function loadTestList() {
   const allTests = await dbGetAll('tests');
-  // super権限（admin）は全テストを表示し、教員は自分の作成したテストを表示
   const tests = currentUser.role === 'super' ? allTests : allTests.filter(t => t.createdBy === currentUser.user);
 
   const container = document.getElementById('test-list');
@@ -737,19 +749,25 @@ async function loadTestList() {
     `;
   }).join('');
 
-  // 各テストのQRコード生成
-  tests.forEach(t => {
-    const studentUrl = `${baseUrl}?testId=${t.id}`;
-    const qrContainer = document.getElementById(`qr-${t.id}`);
-    if (qrContainer) {
-      qrContainer.innerHTML = '';
-      new QRCode(qrContainer, {
-        text: studentUrl,
-        width: 128,
-        height: 128
-      });
-    }
-  });
+  // 修正ポイント: DOMのレンダリング完了を待ってからQRコードを描画する
+  setTimeout(() => {
+    tests.forEach(t => {
+      const studentUrl = `${baseUrl}?testId=${t.id}`;
+      const qrContainer = document.getElementById(`qr-${t.id}`);
+      if (qrContainer) {
+        qrContainer.innerHTML = '';
+        try {
+          new QRCode(qrContainer, {
+            text: studentUrl,
+            width: 128,
+            height: 128
+          });
+        } catch (e) {
+          console.error('QRコード生成エラー:', e);
+        }
+      }
+    });
+  }, 50);
 }
 
 // 追加: テスト削除機能の完全実装
@@ -907,6 +925,7 @@ async function renderResetLogs(testId) {
   `;
 }
 
+// 成績リセット処理の修正
 async function resetTestResults() {
   const testId = document.getElementById('result-test-select').value;
   if (!testId) return;
@@ -929,10 +948,12 @@ async function resetTestResults() {
     return;
   }
 
+  // 1. レコードの削除処理
   for (const ans of targetAnswers) {
     await dbDelete('answers', ans.id);
   }
 
+  // 2. リセットログの保存
   const logData = {
     testId: testId,
     testTitle: test ? test.title : '',
@@ -944,8 +965,34 @@ async function resetTestResults() {
 
   alert('成績データをリセットし、ログを記録しました。');
 
-  // リロードせずリアルタイム更新
-  renderResults();
+  // 3. 画面の即時更新（グラフとテーブルを確実に再描画）
+  await renderResults();
+}
+
+// 全データ初期化処理の修正
+async function resetAllData() {
+  if (!confirm('警告: すべてのテスト・回答履歴・追加アカウント情報が削除されます。本当に実行しますか？')) return;
+
+  // 修正ポイント: DB接続が開いたままだとブロックされるため、先に切断する
+  if (db) {
+    db.close();
+  }
+
+  const req = indexedDB.deleteDatabase(DB_NAME);
+  
+  req.onsuccess = () => {
+    alert('データベースを完全に初期化しました。');
+    location.reload();
+  };
+  
+  req.onerror = () => {
+    alert('データベースの初期化に失敗しました。');
+  };
+  
+  req.onblocked = () => {
+    // 別のタブ等でDBが開かれている場合の警告
+    alert('データベースがブロックされています。他のタブでこのページを開いている場合は閉じてから再実行してください。');
+  };
 }
 
 /* ===================================================
@@ -1024,13 +1071,42 @@ async function changePassword() {
   document.getElementById('pass-new').value = '';
 }
 
+// 全データ初期化処理の修正版
 async function resetAllData() {
-  if (!confirm('警告: すべてのテスト・回答履歴・追加アカウント情報が削除されます。本当に実行しますか？')) return;
+  // 1. ワンクッション目 (確認ダイアログ)
+  if (!confirm('【警告】すべてのテスト・回答履歴・追加アカウント情報が削除されます。\n本当に実行しますか？')) return;
+
+  // 2. 二重確認 (ワンクッション目：文字列入力チェック)
+  const input = prompt('本当にシステムデータを初期化する場合は「リセット」と入力してください。');
+  if (input !== 'リセット') {
+    alert('入力内容が一致しないため、リセット処理をキャンセルしました。');
+    return;
+  }
+
+  // リセット実行日時を localStorage に保存 (DB削除の影響を受けない)
+  const now = new Date().toLocaleString();
+  localStorage.setItem('last_system_reset_time', now);
+
+  // DB接続が開いている場合は閉じる
+  if (db) {
+    db.close();
+  }
 
   const req = indexedDB.deleteDatabase(DB_NAME);
-  req.onsuccess = () => {
-    alert('データベースを完全に初期化しました。');
+
+  req.onsuccess = async () => {
+    // 3. ログイン不能バグ防止策: データベースを再構築して初期アカウントを確実に流し込んでからリロードする
+    await initDB();
+    alert(`データベースを完全に初期化しました。\n初期アカウント（admin / admin123）で再ログインが可能です。\n(リセット日時: ${now})`);
     location.reload();
+  };
+
+  req.onerror = () => {
+    alert('データベースの初期化に失敗しました。');
+  };
+
+  req.onblocked = () => {
+    alert('データベースがブロックされています。他のタブでこのページを開いている場合は閉じてから再実行してください。');
   };
 }
 </script>
