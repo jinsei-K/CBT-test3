@@ -6,8 +6,8 @@
   <title>高度CBTテストシステム</title>
   <!-- Chart.js ライブラリ -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <!-- QRCode.js ライブラリ -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <!-- Excel/CSV名簿読み込み用 -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <style>
     :root {
       --primary: #2563eb;
@@ -98,6 +98,7 @@
     .badge-super { background-color: #7c3aed; }
     .badge-teacher { background-color: #059669; }
     .badge-school-admin { background-color: #ea580c; }
+    .badge-student { background-color: #0891b2; }
     .btn {
       background: var(--primary);
       color: white;
@@ -115,7 +116,7 @@
     .btn-secondary { background: var(--secondary); }
     .btn-secondary:hover { background: #475569; }
     .btn-success { background: var(--success); }
-    input[type="text"], input[type="password"], select, textarea {
+    input[type="text"], input[type="password"], input[type="datetime-local"], select, textarea {
       width: 100%;
       padding: 10px 12px;
       margin: 6px 0 16px;
@@ -180,15 +181,33 @@
   <!-- ==================== 1. 生徒用：テスト受験画面 ==================== -->
   <div id="view-student" class="hidden">
     <div id="student-login">
-      <h2>CBTテスト 受験ログイン</h2>
-      <p id="exam-title-display" style="font-size: 1.2em; font-weight: bold; color: var(--primary);"></p>      
-      <label>学年・クラス・番号（例: 2-1-15）</label>
-      <input type="text" id="std-class-num" placeholder="2-1-15">
-      
-      <label>氏名</label>
-      <input type="text" id="std-name" placeholder="山田 太郎">
-      
-      <button class="btn" onclick="startExam()">試験開始</button>
+      <h2>生徒ログイン</h2>
+      <div id="student-auth-form">
+        <button class="btn btn-secondary" onclick="switchLoginView('admin')">管理ログインへ切り替え</button>
+        <label>生徒アカウント</label>
+        <input type="text" id="student-user-input" placeholder="生徒ID">
+        <label>パスワード</label>
+        <input type="password" id="student-pass-input" placeholder="パスワード">
+        <button class="btn" onclick="loginStudent()">ログイン</button>
+        <p id="student-login-err" style="color:var(--danger); font-weight:bold;"></p>
+      </div>
+      <div id="student-portal" class="hidden">
+        <div class="header-bar">
+          <div><h2 style="display:inline; margin-right:10px;">生徒ダッシュボード</h2><span class="badge badge-student">生徒アカウント</span></div>
+          <div><span id="student-welcome" style="font-weight:bold; margin-right:15px;"></span><button class="btn btn-secondary" onclick="logoutStudent()">ログアウト</button></div>
+        </div>
+        <nav>
+          <button class="btn" onclick="showStudentTab('student-tests-tab')">受験できるテスト</button>
+          <button class="btn" onclick="showStudentTab('student-history-tab')">受験履歴</button>
+          <button class="btn" onclick="showStudentTab('student-settings-tab')">設定</button>
+        </nav>
+        <div id="student-tests-tab" class="student-tab">
+          <div class="card"><h3>参加中のクラス</h3><p id="student-classes">参加中のクラスはありません。</p><label>クラス参加コード</label><input type="text" id="join-class-code" placeholder="クラス参加コード"><button class="btn" onclick="joinClass()">クラスに参加</button></div>
+          <h3>受験できるテスト</h3><div id="available-tests"></div>
+        </div>
+        <div id="student-history-tab" class="student-tab hidden"><h3>受験履歴</h3><div id="student-history"></div></div>
+        <div id="student-settings-tab" class="student-tab hidden"><h3>アカウント設定</h3><button class="btn btn-secondary" onclick="changeStudentPassword()">パスワード変更</button></div>
+      </div>
     </div>
 
     <div id="student-exam" class="hidden">
@@ -227,6 +246,7 @@
     <input type="password" id="admin-pass-input" placeholder="パスワード">
     
     <button class="btn" style="width:100%" onclick="loginAdmin()">ログイン</button>
+    <button class="btn btn-secondary" style="width:100%" onclick="switchLoginView('student')">生徒ログインへ切り替え</button>
     <p id="login-err" style="color:var(--danger); font-weight:bold; margin-top:10px;"></p>
 
     <div class="card" style="margin-top: 30px; font-size: 0.85em;">
@@ -255,6 +275,8 @@
       <button class="btn" id="nav-tests" onclick="showTab('tab-tests')">テスト一覧・配布リンク</button>
       <button class="btn" id="nav-results" onclick="showTab('tab-results')">成績集計・分析</button>
       <button class="btn" id="nav-accounts" onclick="showTab('tab-accounts')">アカウント管理</button>
+      <button class="btn" id="nav-classes" onclick="showTab('tab-classes')">クラス管理</button>
+      <button class="btn" id="nav-students" onclick="showTab('tab-students')">生徒アカウント管理</button>
       <button class="btn" id="nav-settings" onclick="showTab('tab-settings')">設定・AI・セキュリティ</button>
     </nav>
 
@@ -263,6 +285,14 @@
       <h3>新規テストの作成</h3>
       <label>教科 / テスト名</label>
       <input type="text" id="new-test-title" placeholder="例: 数学Ⅰ 期末試験 / 英語 単語テスト">
+
+      <label>公開対象クラス</label>
+      <select id="new-test-classes" multiple size="4"></select>
+      <small>Ctrlキー（MacはCommandキー）で複数選択できます。</small>
+      <label>公開開始日時（空欄なら手動公開）</label>
+      <input type="datetime-local" id="new-test-publish-at">
+      <label>公開終了日時（空欄なら自動終了なし）</label>
+      <input type="datetime-local" id="new-test-close-at">
 
       <h4>問題の追加</h4>
       <div class="card">
@@ -364,6 +394,41 @@
       <div id="teacher-accounts-list"></div>
     </div>
 
+    <div id="tab-classes" class="admin-tab hidden">
+      <h3>クラス管理</h3>
+      <div class="card">
+        <h4>クラスを作成</h4>
+        <label>クラス名</label>
+        <input type="text" id="new-class-name" placeholder="例: 1年A組">
+        <button class="btn" onclick="createClass()">クラスを作成</button>
+      </div>
+      
+      <div id="class-list"></div>
+    </div>
+
+    <div id="tab-students" class="admin-tab hidden">
+      <h3>生徒アカウント管理</h3>
+      <div class="card">
+        <h4>生徒名簿からアカウントを一括発行</h4>
+        <label>名簿ファイル（Excel / CSV）</label>
+        <input type="file" id="student-roster-file" accept=".xlsx,.xls,.csv">
+        <small>1行目に「学籍番号」「氏名」「誕生日」の列を用意してください。誕生日はYYYYMMDD、YYYY/MM/DD、YYYY-MM-DDに対応します。</small>
+        <button class="btn btn-success" onclick="importStudentRoster()">名簿を読み込み生徒を発行</button>
+      </div>
+      <div class="card">
+        <h4>生徒アカウントを手入力で発行</h4>
+        <label>学籍番号（生徒ID）</label>
+        <input type="text" id="manual-student-id" placeholder="例: 2026001">
+        <label>氏名</label>
+        <input type="text" id="manual-student-name" placeholder="例: 山田 太郎">
+        <label>誕生日</label>
+        <input type="date" id="manual-student-birthday">
+        <small>誕生日が初期パスワードになります（YYYYMMDD）。作成後、生徒本人が変更できます。</small>
+        <button class="btn" onclick="createStudentAccountManual()">生徒アカウントを発行</button>
+      </div>
+      <div id="student-account-list"></div>
+    </div>
+
     <!-- タブ5: 設定・AI・セキュリティ -->
     <div id="tab-settings" class="admin-tab hidden">
       <div id="api-settings">
@@ -400,7 +465,7 @@
    1. IndexedDB データベース構築
 =================================================== */
 const DB_NAME = 'AdvancedCBTTesterDB';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 let db = null;
 
 function initDB() {
@@ -409,6 +474,8 @@ function initDB() {
     req.onupgradeneeded = (e) => {
       const d = e.target.result;
       if (!d.objectStoreNames.contains('admins')) d.createObjectStore('admins', { keyPath: 'user' });
+      if (!d.objectStoreNames.contains('classes')) d.createObjectStore('classes', { keyPath: 'id' });
+      if (!d.objectStoreNames.contains('students')) d.createObjectStore('students', { keyPath: 'user' });
       if (!d.objectStoreNames.contains('tests')) d.createObjectStore('tests', { keyPath: 'id' });
       if (!d.objectStoreNames.contains('answers')) d.createObjectStore('answers', { keyPath: 'id', autoIncrement: true });
       if (!d.objectStoreNames.contains('reset_logs')) d.createObjectStore('reset_logs', { keyPath: 'id', autoIncrement: true });
@@ -466,10 +533,12 @@ function dbDelete(storeName, key) {
    2. アプリケーション状態・セッション管理
 =================================================== */
 let currentUser = null;
+let currentStudent = null;
 let currentTest = null;
 let tempQuestions = [];
 let violationCount = 0;
 let currentChart = null;
+let editingTestId = null;
 
 function applyTheme(theme) {
   const isDark = theme === 'dark';
@@ -494,18 +563,13 @@ window.addEventListener('DOMContentLoaded', async () => {
   const testId = urlParams.get('testId');
   const mode = urlParams.get('mode');
 
-  if (testId) {
-    document.getElementById('view-admin-login').classList.add('hidden');
-    document.getElementById('view-student').classList.remove('hidden');
-    loadStudentTest(testId);
-    setupProctoredEvents();
-  } else if (mode === 'admin') {
+  if (mode === 'admin') {
     // 管理者専用画面
     document.getElementById('view-admin-login').classList.remove('hidden');
     document.getElementById('view-student').classList.add('hidden');
   } else {
-    document.getElementById('view-admin-login').classList.remove('hidden');
-    document.getElementById('view-student').classList.add('hidden');
+    document.getElementById('view-admin-login').classList.add('hidden');
+    document.getElementById('view-student').classList.remove('hidden');
   }
 
   // APIキーの読み込み
@@ -541,41 +605,137 @@ document.addEventListener('paste', e => e.preventDefault());
 /* ===================================================
    4. 生徒用機能 (解答・ランダム表示・自動採点・AI連携)
 =================================================== */
-async function loadStudentTest(testId) {
-  currentTest = await dbGet('tests', testId);
-  if (!currentTest) {
-    alert('指定されたテストが見つからないか、削除されています。');
+async function loginStudent() {
+  const user = document.getElementById('student-user-input').value.trim();
+  const pass = document.getElementById('student-pass-input').value;
+  const account = await dbGet('students', user);
+  if (!account || account.pass !== pass) {
+    document.getElementById('student-login-err').innerText = '生徒IDまたはパスワードが正しくありません。';
     return;
   }
-  document.getElementById('exam-title-display').innerText = `対象テスト: ${currentTest.title} (作成者: ${currentTest.createdBy})`;
+  currentStudent = account;
+  document.getElementById('student-login-err').innerText = '';
+  document.getElementById('student-auth-form').classList.add('hidden');
+  document.getElementById('student-portal').classList.remove('hidden');
+  document.getElementById('student-welcome').innerText = `${account.name}（${account.className}）`;
+  renderStudentClasses();
+  await renderAvailableTests();
+  await renderStudentHistory();
 }
 
-function startExam() {
-  const cls = document.getElementById('std-class-num').value.trim();
-  const name = document.getElementById('std-name').value.trim();
-  if (!cls || !name) {
-    alert('学年・クラス・番号と氏名を両方入力してください。');
+function showStudentTab(tabId) {
+  document.querySelectorAll('.student-tab').forEach(tab => tab.classList.add('hidden'));
+  document.getElementById(tabId).classList.remove('hidden');
+}
+
+function logoutStudent() {
+  location.reload();
+}
+
+function renderStudentClasses() {
+  const classesElement = document.getElementById('student-classes');
+  if (!classesElement || !currentStudent) return;
+  classesElement.innerText = currentStudent.className
+    ? currentStudent.className
+    : '参加中のクラスはありません。';
+}
+
+function isTestOpen(test) {
+  const now = Date.now();
+  const publishAt = test.publishAt ? new Date(test.publishAt).getTime() : null;
+  const closeAt = test.closeAt ? new Date(test.closeAt).getTime() : null;
+  if (test.status === 'scheduled' && (!publishAt || publishAt <= now)) {
+    test.status = 'published';
+    dbPut('tests', test);
+  }
+  if (test.status === 'published' && closeAt && closeAt <= now) {
+    test.status = 'closed';
+    dbPut('tests', test);
+  }
+  return test.status === 'published' && (!publishAt || publishAt <= now) && (!closeAt || closeAt > now);
+}
+
+async function joinClass() {
+  const classId = document.getElementById('join-class-code').value.trim();
+  const classItem = (await dbGetAll('classes')).find(item => (item.joinCode || item.id) === classId);
+  if (!classItem) {
+    alert('クラス参加コードが正しくありません。');
     return;
   }
+  currentStudent.classId = classItem.id;
+  currentStudent.className = classItem.name;
+  currentStudent.school = classItem.school;
+  await dbPut('students', currentStudent);
+  document.getElementById('student-welcome').innerText = `${currentStudent.name}（${currentStudent.className}）`;
+  renderStudentClasses();
+  await renderAvailableTests();
+  alert(`${classItem.name}に参加しました。`);
+}
 
-  // フルスクリーンリクエスト
-  if (document.documentElement.requestFullscreen) {
-    document.documentElement.requestFullscreen().catch(() => {});
+function switchLoginView(view) {
+  document.getElementById('view-admin-login').classList.toggle('hidden', view !== 'admin');
+  document.getElementById('view-student').classList.toggle('hidden', view !== 'student');
+}
+
+async function renderAvailableTests() {
+  const tests = await dbGetAll('tests');
+  const available = tests.filter(test => isTestOpen(test) && (test.classIds || []).includes(currentStudent.classId));
+  const container = document.getElementById('available-tests');
+  container.innerHTML = available.length ? available.map(test => `
+    <div class="card">
+      <strong>${test.title}</strong><br>
+      <small>公開者: ${test.createdBy}</small><br>
+      <button class="btn" onclick="beginStudentTest('${test.id}')">受験する</button>
+    </div>
+  `).join('') : '<p>現在受験できるテストはありません。</p>';
+}
+
+async function beginStudentTest(testId) {
+  const test = await dbGet('tests', testId);
+  if (!test || !isTestOpen(test) || !(test.classIds || []).includes(currentStudent.classId)) {
+    alert('このテストは現在受験できません。');
+    return;
   }
-
-  document.getElementById('student-login').classList.add('hidden');
+  currentTest = test;
+  document.getElementById('student-portal').classList.add('hidden');
   document.getElementById('student-exam').classList.remove('hidden');
   document.getElementById('exam-header').innerText = currentTest.title;
+  renderExamForm(JSON.parse(JSON.stringify(currentTest.questions)));
+  setupProctoredEvents();
+}
 
-  // 問題データおよび選択肢のランダム化（シャッフル）
-  const questions = JSON.parse(JSON.stringify(currentTest.questions));
-  questions.forEach(q => {
-    if (q.options && q.options.length > 0) {
-      q.options = shuffleArray(q.options);
-    }
-  });
+async function renderStudentHistory() {
+  const answers = await dbGetAll('answers');
+  const tests = await dbGetAll('tests');
+  const history = answers.filter(answer => answer.studentUser === currentStudent.user);
+  const container = document.getElementById('student-history');
+  container.innerHTML = history.length ? history.reverse().map(answer => {
+    const test = tests.find(item => item.id === answer.testId);
+    return `<div class="card"><strong>${test ? test.title : '削除されたテスト'}</strong><br>${answer.score} / ${answer.maxScore} 点<br><small>${answer.submittedAt}</small><br><button class="btn btn-secondary" onclick="reviewStudentResult(${answer.id})">結果を見る</button></div>`;
+  }).join('') : '<p>受験履歴はありません。</p>';
+}
 
-  renderExamForm(questions);
+async function reviewStudentResult(answerId) {
+  const answer = await dbGet('answers', answerId);
+  if (!answer) {
+    alert('結果を表示できません。');
+    return;
+  }
+  const test = await dbGet('tests', answer.testId);
+  if (!test) {
+    alert('テストが削除されているため、結果を表示できません。');
+    return;
+  }
+  const details = test.questions.map(question => `<p><strong>${question.text}</strong><br>あなたの回答: ${answer.answers[question.id] || '(無回答)'}<br>正解: ${question.answer}</p>`).join('');
+  alert(`${test.title}\n得点: ${answer.score} / ${answer.maxScore}\n\n${details.replace(/<[^>]+>/g, '')}`);
+}
+
+async function changeStudentPassword() {
+  const next = prompt('新しいパスワードを入力してください。');
+  if (!next) return;
+  currentStudent.pass = next;
+  await dbPut('students', currentStudent);
+  alert('パスワードを変更しました。');
 }
 
 function shuffleArray(arr) {
@@ -613,6 +773,13 @@ function renderExamForm(questions) {
 }
 
 async function submitExam() {
+  if (!currentStudent || !isTestOpen(currentTest)) {
+    alert('このテストは終了したため、提出できません。');
+    document.getElementById('student-exam').classList.add('hidden');
+    document.getElementById('student-portal').classList.remove('hidden');
+    await renderAvailableTests();
+    return;
+  }
   if (!confirm('回答を提出します。よろしいですか？')) return;
 
   const answers = {};
@@ -665,8 +832,9 @@ async function submitExam() {
 
   const record = {
     testId: currentTest.id,
-    studentClass: document.getElementById('std-class-num').value,
-    studentName: document.getElementById('std-name').value,
+    studentClass: currentStudent ? currentStudent.className : document.getElementById('std-class-num').value,
+    studentName: currentStudent ? currentStudent.name : document.getElementById('std-name').value,
+    studentUser: currentStudent ? currentStudent.user : null,
     answers: answers,
     score: score,
     maxScore: currentTest.questions.length,
@@ -777,6 +945,8 @@ async function loginAdmin() {
       document.getElementById('nav-results').classList.add('hidden');
       document.getElementById('nav-settings').classList.remove('hidden');
       document.getElementById('api-settings').classList.add('hidden');
+      document.getElementById('nav-classes').classList.add('hidden');
+      document.getElementById('nav-students').classList.add('hidden');
     } else if (account.role === 'schoolAdmin') {
       badge.innerText = `学校ADMIN: ${account.school}`;
       badge.className = 'badge badge-school-admin';
@@ -788,6 +958,8 @@ async function loginAdmin() {
       document.getElementById('nav-results').classList.remove('hidden');
       document.getElementById('nav-settings').classList.remove('hidden');
       document.getElementById('api-settings').classList.remove('hidden');
+      document.getElementById('nav-classes').classList.remove('hidden');
+      document.getElementById('nav-students').classList.remove('hidden');
     } else {
       badge.innerText = '教員アカウント';
       badge.className = 'badge badge-teacher';
@@ -796,6 +968,8 @@ async function loginAdmin() {
       document.getElementById('nav-tests').classList.remove('hidden');
       document.getElementById('nav-results').classList.remove('hidden');
       document.getElementById('nav-settings').classList.remove('hidden');
+      document.getElementById('nav-classes').classList.remove('hidden');
+      document.getElementById('nav-students').classList.add('hidden');
     }
 
     showTab(account.role === 'super' ? 'tab-accounts' : 'tab-create');
@@ -813,12 +987,23 @@ function showTab(tabId) {
     alert('管理者アカウントは学校ADMIN発行とパスワード変更のみ利用できます。');
     return;
   }
+  if (tabId === 'tab-classes' && (!currentUser || !['teacher', 'schoolAdmin'].includes(currentUser.role))) {
+    alert('クラスを管理できる権限がありません。');
+    return;
+  }
+  if (tabId === 'tab-students' && (!currentUser || currentUser.role !== 'schoolAdmin')) {
+    alert('生徒管理は学校ADMINのみ利用できます。');
+    return;
+  }
   document.querySelectorAll('.admin-tab').forEach(el => el.classList.add('hidden'));
   document.getElementById(tabId).classList.remove('hidden');
 
   if (tabId === 'tab-tests') loadTestList();
   if (tabId === 'tab-results') loadResultTestOptions();
   if (tabId === 'tab-accounts') loadTeacherAccounts();
+  if (tabId === 'tab-classes') loadClasses();
+  if (tabId === 'tab-students') loadStudents();
+  if (tabId === 'tab-create') loadClassOptions();
 }
 
 function toggleOptionsInput() {
@@ -889,6 +1074,210 @@ function renderTempQuestions() {
   `).join('');
 }
 
+async function createClass() {
+  if (!currentUser || !['teacher', 'schoolAdmin'].includes(currentUser.role)) {
+    alert('クラスを作成できる権限がありません。');
+    return;
+  }
+  const name = document.getElementById('new-class-name').value.trim();
+  if (!name) {
+    alert('クラス名を入力してください。');
+    return;
+  }
+  await dbPut('classes', {
+    id: `class_${Date.now()}`,
+    joinCode: `join_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    name,
+    owner: currentUser.user,
+    school: currentUser.school || null,
+    createdAt: new Date().toLocaleString()
+  });
+  document.getElementById('new-class-name').value = '';
+  await loadClasses();
+  await loadClassOptions();
+}
+
+async function loadClasses() {
+  if (!currentUser || !['teacher', 'schoolAdmin'].includes(currentUser.role)) return;
+  const classes = (await dbGetAll('classes')).filter(item => item.owner === currentUser.user);
+  const students = await dbGetAll('students');
+  document.getElementById('class-list').innerHTML = classes.length ? classes.map(item => {
+    const members = students.filter(student => student.classId === item.id);
+    return `<div class="card"><strong>${item.name}</strong><br><small>参加コード: <span id="class-code-${item.id}">${item.joinCode || item.id}</span> / 生徒 ${members.length}人</small><br><button class="btn btn-secondary" onclick="copyClassCode('${item.id}')">参加コードをコピー</button><button class="btn btn-secondary" onclick="rotateClassCode('${item.id}')">参加コードを再発行</button><br><button class="btn" onclick="toggleClassMembers('${item.id}')">参加中の生徒を表示</button><div id="class-members-${item.id}" class="hidden">${members.length ? members.map(student => `<div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px;"><span>${student.name} (${student.user})</span><button class="btn btn-danger" onclick="removeStudentFromClass('${item.id}', '${student.user}')">クラスから削除</button></div>`).join('') : '<p>参加している生徒はいません。</p>'}</div><br><button class="btn" onclick="inviteStudentToClass('${item.id}')">既存の生徒を招待</button></div>`;
+  }).join('') : '<p>作成されたクラスはありません。</p>';
+}
+
+async function copyClassCode(classId) {
+  const codeElement = document.getElementById(`class-code-${classId}`);
+  if (!codeElement) return;
+  const code = codeElement.innerText;
+  try {
+    await navigator.clipboard.writeText(code);
+  } catch (error) {
+    const textArea = document.createElement('textarea');
+    textArea.value = code;
+    document.body.appendChild(textArea);
+    textArea.select();
+    document.execCommand('copy');
+    textArea.remove();
+  }
+  alert('クラス参加コードをコピーしました。');
+}
+
+async function rotateClassCode(classId) {
+  const classItem = await dbGet('classes', classId);
+  if (!classItem || classItem.owner !== currentUser.user) return;
+  if (!confirm('参加コードを再発行しますか？再発行前のコードは無効になります。')) return;
+  classItem.joinCode = `join_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  await dbPut('classes', classItem);
+  await loadClasses();
+  alert('参加コードを再発行しました。既に参加中の生徒はそのままです。');
+}
+
+async function removeStudentFromClass(classId, studentUser) {
+  const classItem = await dbGet('classes', classId);
+  const student = await dbGet('students', studentUser);
+  if (!classItem || classItem.owner !== currentUser.user || !student || student.classId !== classId) return;
+  if (!confirm(`${student.name}をクラスから削除しますか？`)) return;
+  student.classId = null;
+  student.className = '';
+  await dbPut('students', student);
+  await loadClasses();
+}
+
+function toggleClassMembers(classId) {
+  const members = document.getElementById(`class-members-${classId}`);
+  if (members) members.classList.toggle('hidden');
+}
+
+function normalizeBirthday(value) {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return `${value.getFullYear()}${String(value.getMonth() + 1).padStart(2, '0')}${String(value.getDate()).padStart(2, '0')}`;
+  }
+  if (typeof value === 'number' && window.XLSX?.SSF) {
+    const date = XLSX.SSF.parse_date_code(value);
+    if (date) return `${date.y}${String(date.m).padStart(2, '0')}${String(date.d).padStart(2, '0')}`;
+  }
+  const digits = String(value ?? '').replace(/[^0-9]/g, '');
+  if (digits.length === 8) return digits;
+  if (digits.length === 6) return `20${digits}`;
+  return '';
+}
+
+async function createStudentAccountManual() {
+  if (!currentUser || currentUser.role !== 'schoolAdmin') {
+    alert('生徒アカウントを発行できる権限がありません。');
+    return;
+  }
+  const user = document.getElementById('manual-student-id').value.trim();
+  const name = document.getElementById('manual-student-name').value.trim();
+  const pass = normalizeBirthday(document.getElementById('manual-student-birthday').value);
+  if (!user || !name || !pass) {
+    alert('学籍番号、氏名、誕生日をすべて入力してください。');
+    return;
+  }
+  if (await dbGet('students', user) || await dbGet('admins', user)) {
+    alert('その学籍番号は既に使用されています。');
+    return;
+  }
+  await dbPut('students', { user, name, pass, classId: null, className: '', school: currentUser.school || null });
+  document.getElementById('manual-student-id').value = '';
+  document.getElementById('manual-student-name').value = '';
+  document.getElementById('manual-student-birthday').value = '';
+  await loadStudents();
+  alert(`生徒アカウント [${user}] を発行しました。初期パスワードは誕生日です。`);
+}
+
+async function importStudentRoster() {
+  if (!currentUser || currentUser.role !== 'schoolAdmin') {
+    alert('生徒アカウントを発行できる権限がありません。');
+    return;
+  }
+  if (!window.XLSX) {
+    alert('Excel読み込み機能を読み込めませんでした。インターネット接続を確認してください。');
+    return;
+  }
+  const file = document.getElementById('student-roster-file').files[0];
+  if (!file) {
+    alert('名簿ファイルを選択してください。');
+    return;
+  }
+
+  const buffer = await file.arrayBuffer();
+  const workbook = XLSX.read(buffer, { type: 'array', cellDates: true });
+  const sheet = workbook.Sheets[workbook.SheetNames[0]];
+  const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+  if (!rows.length) {
+    alert('名簿にデータ行がありません。');
+    return;
+  }
+
+  const findColumn = (row, names) => Object.keys(row).find(key => names.includes(String(key).trim()));
+  const idColumn = findColumn(rows[0], ['学籍番号', '学籍番号（ID）', 'ID', 'studentId']);
+  const nameColumn = findColumn(rows[0], ['氏名', '生徒名', '名前', 'name']);
+  const birthdayColumn = findColumn(rows[0], ['誕生日', '生年月日', 'birthday']);
+  if (!idColumn || !nameColumn || !birthdayColumn) {
+    alert('名簿の列名に「学籍番号」「氏名」「誕生日」を指定してください。');
+    return;
+  }
+
+  let created = 0;
+  let skipped = 0;
+  for (const row of rows) {
+    const user = String(row[idColumn]).trim();
+    const name = String(row[nameColumn]).trim();
+    const pass = normalizeBirthday(row[birthdayColumn]);
+    if (!user || !name || !pass) {
+      skipped++;
+      continue;
+    }
+    if (await dbGet('students', user) || await dbGet('admins', user)) {
+      skipped++;
+      continue;
+    }
+    await dbPut('students', { user, name, pass, classId: null, className: '', school: currentUser.school || null });
+    created++;
+  }
+  document.getElementById('student-roster-file').value = '';
+  await loadStudents();
+  alert(`${created}人の生徒アカウントを発行しました。${skipped ? ` ${skipped}行は未登録です。` : ''}`);
+}
+
+async function loadClassOptions() {
+  const select = document.getElementById('new-test-classes');
+  if (!select || !currentUser || !['teacher', 'schoolAdmin'].includes(currentUser.role)) return;
+  const classes = (await dbGetAll('classes')).filter(item => item.owner === currentUser.user);
+  select.innerHTML = classes.map(item => `<option value="${item.id}">${item.name}</option>`).join('');
+}
+
+async function inviteStudentToClass(classId) {
+  const classItem = await dbGet('classes', classId);
+  if (!classItem || classItem.owner !== currentUser.user) {
+    alert('自分が作成したクラスだけ操作できます。');
+    return;
+  }
+  const user = prompt('生徒IDを入力してください。');
+  if (!user) return;
+  const student = await dbGet('students', user);
+  if (!student) {
+    alert('該当する生徒アカウントがありません。先に生徒アカウント管理から発行してください。');
+    return;
+  }
+  student.classId = classItem.id;
+  student.className = classItem.name;
+  student.school = classItem.school;
+  await dbPut('students', student);
+  await loadClasses();
+  await loadStudents();
+  alert(`${student.name}を${classItem.name}へ招待しました。`);
+}
+
+async function loadStudents() {
+  if (!currentUser || currentUser.role !== 'schoolAdmin') return;
+  const students = (await dbGetAll('students')).filter(student => !student.school || student.school === currentUser.school);
+  document.getElementById('student-account-list').innerHTML = students.length ? students.map(student => `<div class="card"><strong>${student.name}</strong>（ID: ${student.user}）<br><small>${student.className ? `所属クラス: ${student.className}` : '未所属'}</small></div>`).join('') : '<p>生徒アカウントはありません。</p>';
+}
+
 async function saveTest() {
   if (!currentUser || currentUser.role === 'super') {
     alert('管理者アカウントはテストを作成できません。');
@@ -896,25 +1285,44 @@ async function saveTest() {
   }
 
   const title = document.getElementById('new-test-title').value.trim();
+  const classIds = Array.from(document.getElementById('new-test-classes').selectedOptions).map(option => option.value);
+  const publishAt = document.getElementById('new-test-publish-at').value;
+  const closeAt = document.getElementById('new-test-close-at').value;
   if (!title || tempQuestions.length === 0) {
     alert('テスト名と最低1つの問題を追加してください。');
     return;
   }
+  if (classIds.length === 0) {
+    alert('公開対象クラスを1つ以上選択してください。');
+    return;
+  }
+  if (publishAt && closeAt && new Date(closeAt) <= new Date(publishAt)) {
+    alert('公開終了日時は公開開始日時より後にしてください。');
+    return;
+  }
 
-  const testId = 'test_' + Date.now();
+  const testId = editingTestId || 'test_' + Date.now();
   const testData = {
     id: testId,
     title,
     createdBy: currentUser.user,
     questions: tempQuestions,
-    createdAt: new Date().toLocaleString()
+    classIds,
+    publishAt: publishAt || null,
+    closeAt: closeAt || null,
+    status: publishAt && new Date(publishAt) > new Date() ? 'scheduled' : 'published',
+    createdAt: editingTestId ? (await dbGet('tests', editingTestId)).createdAt : new Date().toLocaleString()
   };
 
   await dbPut('tests', testData);
   alert('新しいテストを作成・保存しました！');
 
   tempQuestions = [];
+  editingTestId = null;
   document.getElementById('new-test-title').value = '';
+  document.getElementById('new-test-classes').selectedIndex = -1;
+  document.getElementById('new-test-publish-at').value = '';
+  document.getElementById('new-test-close-at').value = '';
   renderTempQuestions();
   showTab('tab-tests');
 }
@@ -924,10 +1332,10 @@ async function saveTest() {
 =================================================== */
 async function loadTestList() {
   const allTests = await dbGetAll('tests');
-  const tests = currentUser.role === 'super' ? allTests : allTests.filter(t => t.createdBy === currentUser.user);
+  const tests = allTests.filter(t => t.createdBy === currentUser.user);
+  const classes = await dbGetAll('classes');
 
   const container = document.getElementById('test-list');
-  const baseUrl = location.href.split('?')[0];
 
   if (tests.length === 0) {
     container.innerHTML = '<p>作成済みのテストはありません。</p>';
@@ -936,45 +1344,44 @@ async function loadTestList() {
 
   container.innerHTML = '';
   tests.forEach(t => {
-    const studentUrl = `${baseUrl}?testId=${t.id}`;
-    const inputId = `link-input-${t.id}`;
-    const qrCanvasId = `qr-${t.id}`;
+    isTestOpen(t);
+    const targetClasses = (t.classIds || []).map(id => classes.find(item => item.id === id)?.name || '不明なクラス').join(', ');
+    const statusText = t.status === 'published' ? '公開中' : t.status === 'scheduled' ? '公開予約中' : t.status === 'closed' ? '終了' : '非公開';
 
     const card = document.createElement('div');
     card.className = 'card';
     card.innerHTML = `
-      <h4>${t.title} <small style="font-weight:normal; color:#666;">(問題数: ${t.questions.length} / 作成者: ${t.createdBy})</small></h4>
-      <p><strong>【教員配布用】教科個別テストリンク:</strong></p>
-      <div style="display: flex; gap: 8px; margin-bottom: 8px;">
-        <input type="text" id="${inputId}" value="${studentUrl}" readonly onclick="this.select()" style="margin: 0;">
-        <button class="btn" style="white-space: nowrap;" onclick="copyTestLink('${inputId}')">URLをコピー</button>
-      </div>
-      <div style="margin-top: 10px;">
-        <strong>【配布用QRコード】</strong>
-        <div id="${qrCanvasId}" class="qr-container"></div>
-      </div>
+      <h4>${t.title} <small style="font-weight:normal; color:#666;">(問題数: ${t.questions.length})</small></h4>
+      <p>対象クラス: ${targetClasses || '未設定'}<br>状態: <strong>${statusText}</strong><br>公開開始: ${t.publishAt || '即時'}<br>公開終了: ${t.closeAt || '設定なし'}</p>
+      <button class="btn" onclick="editTest('${t.id}')">編集</button>
+      <button class="btn btn-secondary" onclick="toggleTestPublication('${t.id}')">${t.status === 'published' ? '非公開にする' : '公開する'}</button>
       <button class="btn btn-danger" style="margin-top: 15px;" onclick="deleteTest('${t.id}')">このテストを削除</button>
     `;
     container.appendChild(card);
-
-    // QRコード生成処理
-    new QRCode(document.getElementById(qrCanvasId), {
-      text: studentUrl,
-      width: 128,
-      height: 128
-    });
   });
 }
 
-function copyTestLink(inputId) {
-  const inputElem = document.getElementById(inputId);
-  inputElem.select();
-  navigator.clipboard.writeText(inputElem.value).then(() => {
-    alert('テストリンクをクリップボードにコピーしました！');
-  }).catch(() => {
-    document.execCommand('copy');
-    alert('テストリンクをコピーしました！');
-  });
+async function editTest(testId) {
+  const test = await dbGet('tests', testId);
+  if (!test || test.createdBy !== currentUser.user) return;
+  editingTestId = testId;
+  document.getElementById('new-test-title').value = test.title;
+  await loadClassOptions();
+  Array.from(document.getElementById('new-test-classes').options).forEach(option => { option.selected = (test.classIds || []).includes(option.value); });
+  document.getElementById('new-test-publish-at').value = test.publishAt || '';
+  document.getElementById('new-test-close-at').value = test.closeAt || '';
+  tempQuestions = JSON.parse(JSON.stringify(test.questions));
+  renderTempQuestions();
+  showTab('tab-create');
+}
+
+async function toggleTestPublication(testId) {
+  const test = await dbGet('tests', testId);
+  if (!test || test.createdBy !== currentUser.user) return;
+  test.status = test.status === 'published' ? 'draft' : 'published';
+  if (test.status === 'published' && test.closeAt && new Date(test.closeAt) <= new Date()) test.closeAt = null;
+  await dbPut('tests', test);
+  loadTestList();
 }
 
 async function deleteTest(testId) {
