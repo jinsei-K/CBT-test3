@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>高度CBTテストシステム</title>
+  <title>CBTテストシステム</title>
   <!-- Chart.js ライブラリ -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <!-- Excel/CSV名簿読み込み用 -->
@@ -226,7 +226,7 @@
       
       <div class="card" style="margin-top: 20px;">
         <h3>採点結果</h3>
-        <p style="font-size: 1.3em;">あなたの得点: <strong id="res-score" style="color: var(--primary); font-size: 1.5em;"></strong></p>
+        <p style="font-size: 1.3em;"><strong id="res-score" style="color: var(--primary); font-size: 1.5em;"></strong></p>
         <div id="res-details"></div>
       </div>
     </div>
@@ -358,9 +358,13 @@
 
         <div style="display:flex; justify-content:space-between; align-items:center; margin-top: 30px;">
           <h4>生徒別成績・解答明細</h4>
+          <button class="btn btn-success" onclick="publishTestScores()">点数を公開</button>
           <button class="btn btn-danger" onclick="resetTestResults()">このテストの成績をリセット</button>
         </div>
         <div id="student-results-table"></div>
+
+        <h4 style="margin-top: 40px;">問題別解答一覧・正答率</h4>
+        <div id="question-analysis"></div>
 
         <h4 style="margin-top: 40px;">成績リセット履歴（ログ）</h4>
         <div id="reset-log-table"></div>
@@ -376,6 +380,10 @@
         <input type="text" id="new-teacher-id" placeholder="例: teacher_sato">
         <label>初期パスワード</label>
         <input type="password" id="new-teacher-pass">
+        <label>付与する権限</label>
+        <label><input type="checkbox" id="perm-create-test" checked> テスト作成・編集</label>
+        <label><input type="checkbox" id="perm-grade" checked> 成績確認・記述採点</label>
+        <label><input type="checkbox" id="perm-class" checked> クラス管理</label>
         <button class="btn" onclick="createTeacherAccount()">アカウントを作成</button>
       </div>
 
@@ -711,7 +719,8 @@ async function renderStudentHistory() {
   const container = document.getElementById('student-history');
   container.innerHTML = history.length ? history.reverse().map(answer => {
     const test = tests.find(item => item.id === answer.testId);
-    return `<div class="card"><strong>${test ? test.title : '削除されたテスト'}</strong><br>${answer.score} / ${answer.maxScore} 点<br><small>${answer.submittedAt}</small><br><button class="btn btn-secondary" onclick="reviewStudentResult(${answer.id})">結果を見る</button></div>`;
+    const scoreText = answer.scorePublished && answer.score !== null ? `${answer.score} / ${answer.maxScore} 点` : '点数は未公開です';
+    return `<div class="card"><strong>${test ? test.title : '削除されたテスト'}</strong><br>${scoreText}<br><small>${answer.submittedAt}</small><br><button class="btn btn-secondary" onclick="reviewStudentResult(${answer.id})">解答を見る</button></div>`;
   }).join('') : '<p>受験履歴はありません。</p>';
 }
 
@@ -727,7 +736,8 @@ async function reviewStudentResult(answerId) {
     return;
   }
   const details = test.questions.map(question => `<p><strong>${question.text}</strong><br>あなたの回答: ${answer.answers[question.id] || '(無回答)'}<br>正解: ${question.answer}</p>`).join('');
-  alert(`${test.title}\n得点: ${answer.score} / ${answer.maxScore}\n\n${details.replace(/<[^>]+>/g, '')}`);
+  const scoreText = answer.scorePublished && answer.score !== null ? `${answer.score} / ${answer.maxScore}` : '未公開';
+  alert(`${test.title}\n得点: ${scoreText}\n\n${details.replace(/<[^>]+>/g, '')}`);
 }
 
 async function changeStudentPassword() {
@@ -783,6 +793,7 @@ async function submitExam() {
   if (!confirm('回答を提出します。よろしいですか？')) return;
 
   const answers = {};
+  const questionScores = {};
   let score = 0;
   const questionResults = [];
 
@@ -790,12 +801,14 @@ async function submitExam() {
     let studentAns = '';
     let isCorrect = false;
     let markType = 'incorrect'; // perfect, correct, partial, incorrect
+    questionScores[q.id] = 0;
 
     if (q.type === 'single') {
       const el = document.querySelector(`input[name="q_${q.id}"]:checked`);
       studentAns = el ? el.value : '';
       if (studentAns === q.answer) {
         score++;
+        questionScores[q.id] = 1;
         markType = 'perfect'; // 二重丸/花丸相当
       }
     } else if (q.type === 'multiple') {
@@ -806,6 +819,7 @@ async function submitExam() {
       
       if (selected === correct) {
         score++;
+        questionScores[q.id] = 1;
         markType = 'perfect';
       } else if (selected !== '' && correct.includes(selected)) {
         markType = 'partial'; // 三角(部分点/惜しい)
@@ -813,12 +827,8 @@ async function submitExam() {
     } else if (q.type === 'text') {
       const el = document.querySelector(`input[name="q_${q.id}"]`);
       studentAns = el ? el.value.trim() : '';
-      if (studentAns === q.answer.trim()) {
-        score++;
-        markType = 'correct'; // 丸
-      } else if (studentAns !== '' && q.answer.trim().includes(studentAns)) {
-        markType = 'partial'; // 三角
-      }
+      questionScores[q.id] = null;
+      markType = 'pending';
     }
 
     answers[q.id] = studentAns;
@@ -836,8 +846,10 @@ async function submitExam() {
     studentName: currentStudent ? currentStudent.name : document.getElementById('std-name').value,
     studentUser: currentStudent ? currentStudent.user : null,
     answers: answers,
-    score: score,
+    score: currentTest.questions.some(q => q.type === 'text') ? null : score,
     maxScore: currentTest.questions.length,
+    questionScores,
+    scorePublished: false,
     violations: violationCount,
     submittedAt: new Date().toLocaleString()
   };
@@ -853,7 +865,7 @@ async function submitExam() {
 }
 
 async function renderStudentResult(score, maxScore, questionResults) {
-  document.getElementById('res-score').innerText = `${score} / ${maxScore} 点`;
+  document.getElementById('res-score').innerText = '採点完了後に点数が公開されます。';
   const container = document.getElementById('res-details');
   container.innerHTML = '';
 
@@ -868,6 +880,7 @@ async function renderStudentResult(score, maxScore, questionResults) {
     let markHtml = '';
     if (item.markType === 'perfect') markHtml = '<span class="mark-icon mark-perfect">◎</span>';
     else if (item.markType === 'correct') markHtml = '<span class="mark-icon mark-correct">○</span>';
+    else if (item.markType === 'pending') markHtml = '<span class="mark-icon">－</span>';
     else if (item.markType === 'partial') markHtml = '<span class="mark-icon mark-partial">△</span>';
     else markHtml = '<span class="mark-icon mark-incorrect">✕</span>';
 
@@ -970,6 +983,10 @@ async function loginAdmin() {
       document.getElementById('nav-settings').classList.remove('hidden');
       document.getElementById('nav-classes').classList.remove('hidden');
       document.getElementById('nav-students').classList.add('hidden');
+      const permissions = account.permissions || { createTest: true, grade: true, manageClass: true };
+      document.getElementById('nav-create').classList.toggle('hidden', !permissions.createTest);
+      document.getElementById('nav-results').classList.toggle('hidden', !permissions.grade);
+      document.getElementById('nav-classes').classList.toggle('hidden', !permissions.manageClass);
     }
 
     showTab(account.role === 'super' ? 'tab-accounts' : 'tab-create');
@@ -990,6 +1007,13 @@ function showTab(tabId) {
   if (tabId === 'tab-classes' && (!currentUser || !['teacher', 'schoolAdmin'].includes(currentUser.role))) {
     alert('クラスを管理できる権限がありません。');
     return;
+  }
+  if (currentUser && currentUser.role === 'teacher') {
+    const permissions = currentUser.permissions || { createTest: true, grade: true, manageClass: true };
+    if (tabId === 'tab-create' && !permissions.createTest || tabId === 'tab-results' && !permissions.grade || tabId === 'tab-classes' && !permissions.manageClass) {
+      alert('この操作の権限がありません。');
+      return;
+    }
   }
   if (tabId === 'tab-students' && (!currentUser || currentUser.role !== 'schoolAdmin')) {
     alert('生徒管理は学校ADMINのみ利用できます。');
@@ -1075,7 +1099,7 @@ function renderTempQuestions() {
 }
 
 async function createClass() {
-  if (!currentUser || !['teacher', 'schoolAdmin'].includes(currentUser.role)) {
+  if (!currentUser || !['teacher', 'schoolAdmin'].includes(currentUser.role) || currentUser.role === 'teacher' && currentUser.permissions && !currentUser.permissions.manageClass) {
     alert('クラスを作成できる権限がありません。');
     return;
   }
@@ -1279,7 +1303,7 @@ async function loadStudents() {
 }
 
 async function saveTest() {
-  if (!currentUser || currentUser.role === 'super') {
+  if (!currentUser || currentUser.role === 'super' || currentUser.role === 'teacher' && currentUser.permissions && !currentUser.permissions.createTest) {
     alert('管理者アカウントはテストを作成できません。');
     return;
   }
@@ -1407,6 +1431,10 @@ async function loadResultTestOptions() {
 }
 
 async function renderResults() {
+  if (!currentUser || currentUser.role === 'super' || currentUser.role === 'teacher' && currentUser.permissions && !currentUser.permissions.grade) {
+    alert('成績管理の権限がありません。');
+    return;
+  }
   const testId = document.getElementById('result-test-select').value;
   const area = document.getElementById('analytics-area');
 
@@ -1469,9 +1497,9 @@ async function renderResults() {
             <tr>
               <td>${r.studentClass}</td>
               <td>${r.studentName}</td>
-              <td><strong>${r.score}</strong> / ${r.maxScore}</td>
+              <td><strong>${r.score === null ? '未採点' : r.score}</strong> / ${r.maxScore}</td>
               <td style="${r.violations > 0 ? 'color:var(--danger); font-weight:bold;' : ''}">${r.violations} 回</td>
-              <td>${r.submittedAt}</td>
+              <td>${r.submittedAt}<br><button class="btn btn-secondary" onclick="showStudentAnswers(${r.id}, '${testId}')">解答を確認</button></td>
             </tr>
           `).join('')}
         </tbody>
@@ -1479,7 +1507,74 @@ async function renderResults() {
     `;
   }
 
+  renderQuestionAnalysis(test, results);
+
   await renderResetLogs(testId);
+}
+
+async function showStudentAnswers(answerId, testId) {
+  const answer = await dbGet('answers', answerId);
+  const test = await dbGet('tests', testId);
+  if (!answer || !test) return;
+  const rows = test.questions.map((question, index) => {
+    const value = answer.answers[question.id] || '(無回答)';
+    const score = answer.questionScores?.[question.id];
+    return `<div class="card"><strong>問${index + 1}. ${question.text}</strong><br>生徒の回答: ${value}<br>正解: ${question.answer}${question.type === 'text' ? `<br><label>採点（0〜1点）</label><input type="number" min="0" max="1" step="0.5" id="grade-${answerId}-${question.id}" value="${score ?? ''}"><button class="btn" onclick="gradeAnswer(${answerId}, '${question.id}', '${testId}')">採点を保存</button>` : `<br>得点: ${score ?? 0}`}</div>`;
+  }).join('');
+  document.getElementById('student-results-table').insertAdjacentHTML('afterend', `<div id="answer-detail-${answerId}" class="card"><h4>${answer.studentName}の解答</h4>${rows}</div>`);
+}
+
+async function gradeAnswer(answerId, questionId, testId) {
+  if (!currentUser || currentUser.role === 'super' || currentUser.role === 'teacher' && currentUser.permissions && !currentUser.permissions.grade) {
+    alert('記述採点の権限がありません。');
+    return;
+  }
+  const input = document.getElementById(`grade-${answerId}-${questionId}`);
+  const value = Number(input.value);
+  if (!Number.isFinite(value) || value < 0 || value > 1) {
+    alert('採点は0〜1の範囲で入力してください。');
+    return;
+  }
+  const answer = await dbGet('answers', answerId);
+  answer.questionScores = answer.questionScores || {};
+  answer.questionScores[questionId] = value;
+  const scores = Object.values(answer.questionScores);
+  answer.score = scores.every(score => score !== null && score !== undefined) ? scores.reduce((sum, score) => sum + Number(score), 0) : null;
+  await dbPut('answers', answer);
+  alert('採点を保存しました。');
+  renderResults();
+}
+
+async function publishTestScores() {
+  const testId = document.getElementById('result-test-select').value;
+  const test = await dbGet('tests', testId);
+  if (!test || !currentUser || currentUser.role === 'super' || currentUser.role === 'teacher' && currentUser.permissions && !currentUser.permissions.grade) {
+    alert('点数公開の権限がありません。');
+    return;
+  }
+  const answers = (await dbGetAll('answers')).filter(answer => answer.testId === testId);
+  for (const answer of answers) {
+    answer.scorePublished = true;
+    await dbPut('answers', answer);
+  }
+  alert('点数を公開しました。');
+  renderResults();
+}
+
+function renderQuestionAnalysis(test, results) {
+  const container = document.getElementById('question-analysis');
+  container.innerHTML = test.questions.map((question, index) => {
+    const values = results.map(result => result.answers[question.id] || '(無回答)');
+    const correct = values.filter(value => value === question.answer).length;
+    const groups = {};
+    values.filter(value => value !== question.answer).forEach(value => {
+      const key = String(value).toLowerCase().replace(/[\s。、,.，]+/g, '');
+      if (!groups[key]) groups[key] = { value, count: 0 };
+      groups[key].count++;
+    });
+    const mistakes = Object.values(groups).sort((left, right) => right.count - left.count).slice(0, 5).map(group => `${group.value}（${group.count}人）`).join(', ') || 'なし';
+    return `<div class="card"><strong>問${index + 1}. ${question.text}</strong><br>正答率: ${results.length ? (correct / results.length * 100).toFixed(1) : 0}%<br>よくある間違い: ${mistakes}<details><summary>この問題の解答一覧</summary>${values.map((value, studentIndex) => `<div>${results[studentIndex].studentName}: ${value}</div>`).join('')}</details></div>`;
+  }).join('');
 }
 
 async function renderResetLogs(testId) {
@@ -1573,12 +1668,31 @@ async function createTeacherAccount() {
     return;
   }
 
-  await dbPut('admins', { user: u, pass: p, role: 'teacher', school: currentUser.school });
+  await dbPut('admins', {
+    user: u,
+    pass: p,
+    role: 'teacher',
+    school: currentUser.school,
+    permissions: {
+      createTest: document.getElementById('perm-create-test').checked,
+      grade: document.getElementById('perm-grade').checked,
+      manageClass: document.getElementById('perm-class').checked
+    }
+  });
   alert(`教員アカウント [${u}]（${currentUser.school}）を作成しました。`);
   
   document.getElementById('new-teacher-id').value = '';
   document.getElementById('new-teacher-pass').value = '';
   loadTeacherAccounts();
+}
+
+function formatPermissions(permissions) {
+  const current = permissions || { createTest: true, grade: true, manageClass: true };
+  const labels = [];
+  if (current.createTest) labels.push('テスト作成');
+  if (current.grade) labels.push('成績管理');
+  if (current.manageClass) labels.push('クラス管理');
+  return labels.length ? labels.join('・') : 'なし';
 }
 
 async function createSchoolAdminAccount() {
@@ -1627,10 +1741,23 @@ async function loadTeacherAccounts() {
 
   list.innerHTML = accounts.map(t => `
     <div class="card" style="display:flex; justify-content:space-between; align-items:center;">
-      <div><strong>${t.role === 'schoolAdmin' ? '学校ADMIN' : '教員'}: ${t.user}</strong>${t.school ? `<br><small>学校: ${t.school}</small>` : ''}</div>
-      ${currentUser.role === 'schoolAdmin' ? `<button class="btn btn-danger" onclick="deleteTeacher('${t.user}')">アカウント削除</button>` : ''}
+      <div><strong>${t.role === 'schoolAdmin' ? '学校ADMIN' : '教員'}: ${t.user}</strong>${t.school ? `<br><small>学校: ${t.school}</small>` : ''}${t.role === 'teacher' ? `<br><small>権限: ${formatPermissions(t.permissions)}</small>` : ''}</div>
+      ${currentUser.role === 'schoolAdmin' ? `<button class="btn" onclick="editTeacherPermissions('${t.user}')">権限変更</button><button class="btn btn-danger" onclick="deleteTeacher('${t.user}')">アカウント削除</button>` : ''}
     </div>
   `).join('');
+}
+
+async function editTeacherPermissions(user) {
+  if (!currentUser || currentUser.role !== 'schoolAdmin') return;
+  const account = await dbGet('admins', user);
+  if (!account || account.role !== 'teacher' || account.school !== currentUser.school) return;
+  const current = account.permissions || { createTest: true, grade: true, manageClass: true };
+  const createTest = confirm('テスト作成・編集を許可しますか？');
+  const grade = confirm('成績確認・記述採点を許可しますか？');
+  const manageClass = confirm('クラス管理を許可しますか？');
+  account.permissions = { createTest, grade, manageClass };
+  await dbPut('admins', account);
+  loadTeacherAccounts();
 }
 
 async function deleteTeacher(user) {
