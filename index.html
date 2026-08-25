@@ -6,8 +6,8 @@
   <title>高度CBTテストシステム</title>
   <!-- Chart.js ライブラリ -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <!-- QRコード生成ライブラリを追加 -->
-  <script src="https://cdnjs.cloudflare.net/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <!-- QRCode.js ライブラリ -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
   <style>
     :root {
       --primary: #2563eb;
@@ -17,8 +17,35 @@
       --success: #16a34a;
       --bg: #f8fafc;
       --card: #ffffff;
+      --surface: #fafafa;
+      --input-bg: #ffffff;
+      --muted-bg: #f1f5f9;
+      --warning-bg: #fef2f2;
+      --warning-border: #fca5a5;
+      --ai-bg: #f0fdf4;
+      --ai-border: #bbf7d0;
+      --muted-text: #666666;
       --border: #e2e8f0;
       --text: #1e293b;
+    }
+    :root[data-theme="dark"] {
+      --primary: #60a5fa;
+      --primary-hover: #93c5fd;
+      --secondary: #94a3b8;
+      --danger: #f87171;
+      --success: #4ade80;
+      --bg: #0f172a;
+      --card: #1e293b;
+      --surface: #273449;
+      --input-bg: #172033;
+      --muted-bg: #334155;
+      --warning-bg: #3b1f2b;
+      --warning-border: #fb7185;
+      --ai-bg: #123328;
+      --ai-border: #4ade80;
+      --muted-text: #cbd5e1;
+      --border: #475569;
+      --text: #e2e8f0;
     }
     * { box-sizing: border-box; }
     body {
@@ -27,6 +54,20 @@
       color: var(--text);
       margin: 0;
       padding: 20px;
+      user-select: none; /* コピー・テキスト選択防止 */
+    }
+    .theme-toggle {
+      position: fixed;
+      top: 16px;
+      right: 16px;
+      z-index: 10;
+      border: 1px solid var(--border);
+      background: var(--card);
+      color: var(--text);
+      padding: 8px 12px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-weight: 600;
     }
     .container {
       max-width: 1000px;
@@ -37,7 +78,6 @@
       box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
     }
     .hidden { display: none !important; }
-    
     h1, h2, h3, h4 { margin-top: 0; }
     .header-bar {
       display: flex;
@@ -47,7 +87,6 @@
       border-bottom: 2px solid var(--border);
       margin-bottom: 24px;
     }
-    
     .badge {
       display: inline-block;
       padding: 4px 8px;
@@ -58,7 +97,7 @@
     }
     .badge-super { background-color: #7c3aed; }
     .badge-teacher { background-color: #059669; }
-    
+    .badge-school-admin { background-color: #ea580c; }
     .btn {
       background: var(--primary);
       color: white;
@@ -76,7 +115,6 @@
     .btn-secondary { background: var(--secondary); }
     .btn-secondary:hover { background: #475569; }
     .btn-success { background: var(--success); }
-    
     input[type="text"], input[type="password"], select, textarea {
       width: 100%;
       padding: 10px 12px;
@@ -84,36 +122,34 @@
       border: 1px solid var(--border);
       border-radius: 6px;
       font-size: 14px;
+      background: var(--input-bg);
+      color: var(--text);
     }
-    
+    input::placeholder, textarea::placeholder { color: var(--muted-text); }
     .card {
       border: 1px solid var(--border);
       padding: 20px;
       margin-bottom: 16px;
       border-radius: 8px;
-      background: #fafafa;
+      background: var(--surface);
     }
-    
     .warning-banner {
-      background: #fef2f2;
+      background: var(--warning-bg);
       color: var(--danger);
-      border: 1px solid #fca5a5;
+      border: 1px solid var(--warning-border);
       padding: 12px;
       border-radius: 6px;
       margin-bottom: 16px;
       font-weight: bold;
     }
-
     nav {
       display: flex;
       gap: 8px;
       margin-bottom: 24px;
       flex-wrap: wrap;
     }
-
     .q-img { max-width: 100%; max-height: 250px; object-fit: contain; margin: 10px 0; border-radius: 6px; }
     .chart-container { position: relative; width: 100%; max-width: 650px; margin: 20px auto; }
-
     table {
       width: 100%;
       border-collapse: collapse;
@@ -124,11 +160,20 @@
       padding: 10px;
       text-align: left;
     }
-    th { background: #f1f5f9; }
-    .qr-container { margin-top: 10px; padding: 10px; background: white; display: inline-block; border: 1px solid var(--border); }
+    th { background: var(--muted-bg); }
+    /* 採点マーク用記号スタイル */
+    .mark-icon { font-size: 20px; font-weight: bold; margin-right: 8px; }
+    .mark-perfect { color: #e11d48; } /* ◎ 花丸/二重丸 */
+    .mark-correct { color: #16a34a; } /* ○ 正解 */
+    .mark-partial { color: #d97706; } /* △ 惜しい */
+    .mark-incorrect { color: #dc2626; } /* ✕ 不正解 */
+    .qr-container { margin-top: 10px; display: flex; justify-content: center; background: white; padding: 10px; }
+    .ai-box { background: var(--ai-bg); border: 1px solid var(--ai-border); padding: 12px; border-radius: 6px; margin-top: 10px; }
   </style>
 </head>
 <body>
+
+<button class="theme-toggle" id="theme-toggle" type="button" onclick="toggleTheme()" aria-label="表示テーマを切り替える"></button>
 
 <div class="container">
 
@@ -136,9 +181,8 @@
   <div id="view-student" class="hidden">
     <div id="student-login">
       <h2>CBTテスト 受験ログイン</h2>
-      <p id="exam-title-display" style="font-size: 1.2em; font-weight: bold; color: var(--primary);"></p>
-      
-      <label>学年・クラス・番号（例: 2年1組15番）</label>
+      <p id="exam-title-display" style="font-size: 1.2em; font-weight: bold; color: var(--primary);"></p>      
+      <label>学年・クラス・番号（例: 2-1-15）</label>
       <input type="text" id="std-class-num" placeholder="2-1-15">
       
       <label>氏名</label>
@@ -156,10 +200,16 @@
       <button class="btn btn-success" style="width: 100%; font-size: 1.1em; padding: 14px;" onclick="submitExam()">解答を送信する</button>
     </div>
 
-    <div id="student-complete" class="hidden" style="text-align: center; padding: 40px 0;">
-      <h2 style="color: var(--success);">送信が完了しました</h2>
-      <p>解答データはローカルデータベース（IndexedDB）に安全に自動保存されました。</p>
-      <p>試験を終了してください。</p>
+    <!-- 送信完了 兼 採点結果・AI解説表示画面 -->
+    <div id="student-complete" class="hidden" style="padding: 20px 0;">
+      <h2 style="color: var(--success); text-align: center;">解答の送信が完了しました</h2>
+      <p style="text-align: center;">解答データはローカル（IndexedDB）へ正常に記録されました。</p>
+      
+      <div class="card" style="margin-top: 20px;">
+        <h3>採点結果</h3>
+        <p style="font-size: 1.3em;">あなたの得点: <strong id="res-score" style="color: var(--primary); font-size: 1.5em;"></strong></p>
+        <div id="res-details"></div>
+      </div>
     </div>
   </div>
 
@@ -181,8 +231,8 @@
 
     <div class="card" style="margin-top: 30px; font-size: 0.85em;">
       <strong>【初期アカウント情報】</strong><br>
-      ・おおもと管理者 (SuperAdmin): <code>admin</code> / パスワード: <code>admin123</code><br>
-      ・教員アカウント (Teacher): <code>teacher1</code> / パスワード: <code>teacher123</code>
+      ・管理者アカウント: <code>admin</code> / パスワード: <code>admin123</code><br>
+      ※学校ADMINアカウントは、管理者アカウントが発行します。
     </div>
   </div>
 
@@ -201,11 +251,11 @@
     </div>
 
     <nav>
-      <button class="btn" onclick="showTab('tab-create')">テスト・問題作成</button>
-      <button class="btn" onclick="showTab('tab-tests')">テスト一覧・配布リンク</button>
-      <button class="btn" onclick="showTab('tab-results')">成績集計・分析</button>
-      <button class="btn" id="nav-accounts" onclick="showTab('tab-accounts')">教員アカウント管理</button>
-      <button class="btn" onclick="showTab('tab-settings')">設定・セキュリティ</button>
+      <button class="btn" id="nav-create" onclick="showTab('tab-create')">テスト・問題作成</button>
+      <button class="btn" id="nav-tests" onclick="showTab('tab-tests')">テスト一覧・配布リンク</button>
+      <button class="btn" id="nav-results" onclick="showTab('tab-results')">成績集計・分析</button>
+      <button class="btn" id="nav-accounts" onclick="showTab('tab-accounts')">アカウント管理</button>
+      <button class="btn" id="nav-settings" onclick="showTab('tab-settings')">設定・AI・セキュリティ</button>
     </nav>
 
     <!-- タブ1: テスト・問題作成 -->
@@ -246,10 +296,10 @@
       <button class="btn btn-success" style="font-size: 1.1em; width: 100%; padding: 12px; margin-top: 15px;" onclick="saveTest()">テストを発行・保存する</button>
     </div>
 
-    <!-- タブ2: テスト一覧・配布リンク生成 -->
+    <!-- タブ2: テスト一覧・配布リンク生成 & QRコード -->
     <div id="tab-tests" class="admin-tab hidden">
       <h3>発行済みテスト一覧</h3>
-      <p style="color:#666; font-size:0.9em;">※ 各テストごとに教科・試験用の個別URLおよびQRコードが生成されます。</p>
+      <p style="color:var(--muted-text); font-size:0.9em;">※ 各テストごとに教科・試験用の個別URLおよびQRコードが生成されます。</p>
       <div id="test-list"></div>
     </div>
 
@@ -282,16 +332,15 @@
         </div>
         <div id="student-results-table"></div>
 
-        <!-- リセットログ表示エリア -->
         <h4 style="margin-top: 40px;">成績リセット履歴（ログ）</h4>
         <div id="reset-log-table"></div>
       </div>
     </div>
 
-    <!-- タブ4: 教員アカウント管理（おおもとアカウント専用） -->
+    <!-- タブ4: アカウント管理 -->
     <div id="tab-accounts" class="admin-tab hidden">
-      <h3>教員アカウント管理（管理者専用）</h3>
-      <div class="card">
+      <h3>アカウント管理</h3>
+      <div class="card" id="teacher-account-form">
         <h4>新規教員アカウント発行</h4>
         <label>ユーザーID</label>
         <input type="text" id="new-teacher-id" placeholder="例: teacher_sato">
@@ -300,12 +349,34 @@
         <button class="btn" onclick="createTeacherAccount()">アカウントを作成</button>
       </div>
 
-      <h4>登録済み教員アカウント一覧</h4>
+      <div class="card" id="school-admin-account-form">
+        <h4>学校ADMINアカウント発行（管理者アカウント専用）</h4>
+        <label>学校名</label>
+        <input type="text" id="new-school-name" placeholder="例: 〇〇市立〇〇中学校">
+        <label>ADMINユーザーID</label>
+        <input type="text" id="new-school-admin-id" placeholder="例: admin_school_a">
+        <label>初期パスワード</label>
+        <input type="password" id="new-school-admin-pass">
+        <button class="btn btn-success" onclick="createSchoolAdminAccount()">学校ADMINを発行</button>
+      </div>
+
+      <h4>登録済みアカウント一覧</h4>
       <div id="teacher-accounts-list"></div>
     </div>
 
-    <!-- タブ5: 設定・セキュリティ -->
+    <!-- タブ5: 設定・AI・セキュリティ -->
     <div id="tab-settings" class="admin-tab hidden">
+      <div id="api-settings">
+        <h3>Gemini API設定（AI解説機能）</h3>
+        <div class="card">
+        <label>Gemini API Key</label>
+        <input type="password" id="gemini-api-key" placeholder="AI解説用のAPIキーを入力">
+        <button class="btn" onclick="saveApiKey()">APIキーを保存</button>
+        </div>
+      </div>
+
+      <hr style="margin: 30px 0;">
+
       <h3>アカウントパスワード変更</h3>
       <div class="card">
         <label>現在のパスワード</label>
@@ -317,19 +388,7 @@
 
       <hr style="margin: 30px 0;">
 
-      <!-- 修正後: タブ5 のデータ管理部分 -->
       <h3>データ管理・初期化</h3>
-      <div class="card" style="border-color: var(--danger);">
-        <h4 style="color:var(--danger);">システムデータのリセット</h4>
-        <p style="font-size:0.9em; color:#666;">すべてのテストデータ、問題データ、解答レコード、追加アカウントを削除し初期状態に戻します。</p>
-        
-        <!-- 前回リセット日時の表示エリアを追加 -->
-        <p style="font-size:0.9em; font-weight:bold; color:var(--text);">
-          前回システムリセット日時: <span id="last-system-reset-time">なし</span>
-        </p>
-
-        <button class="btn btn-danger" onclick="resetAllData()">全データをリセットする</button>
-      </div>
     </div>
 
   </div>
@@ -353,6 +412,7 @@ function initDB() {
       if (!d.objectStoreNames.contains('tests')) d.createObjectStore('tests', { keyPath: 'id' });
       if (!d.objectStoreNames.contains('answers')) d.createObjectStore('answers', { keyPath: 'id', autoIncrement: true });
       if (!d.objectStoreNames.contains('reset_logs')) d.createObjectStore('reset_logs', { keyPath: 'id', autoIncrement: true });
+      if (!d.objectStoreNames.contains('config')) d.createObjectStore('config', { keyPath: 'key' });
     };
     req.onsuccess = (e) => {
       db = e.target.result;
@@ -367,10 +427,7 @@ async function seedDefaultAdmins() {
   if (!superAdmin) {
     await dbPut('admins', { user: 'admin', pass: 'admin123', role: 'super' });
   }
-  const teacherAdmin = await dbGet('admins', 'teacher1');
-  if (!teacherAdmin) {
-    await dbPut('admins', { user: 'teacher1', pass: 'teacher123', role: 'teacher' });
-  }
+  await dbDelete('admins', 'teacher1');
 }
 
 function dbGet(storeName, key) {
@@ -414,22 +471,52 @@ let tempQuestions = [];
 let violationCount = 0;
 let currentChart = null;
 
+function applyTheme(theme) {
+  const isDark = theme === 'dark';
+  document.documentElement.dataset.theme = isDark ? 'dark' : 'light';
+  const toggle = document.getElementById('theme-toggle');
+  toggle.innerText = isDark ? '☀️ ライト' : '🌙 ダーク';
+  toggle.setAttribute('aria-label', isDark ? 'ライトモードに切り替える' : 'ダークモードに切り替える');
+}
+
+function toggleTheme() {
+  const nextTheme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+  localStorage.setItem('cbt-theme', nextTheme);
+  applyTheme(nextTheme);
+}
+
 window.addEventListener('DOMContentLoaded', async () => {
+  applyTheme(localStorage.getItem('cbt-theme') || 'light');
   await initDB();
 
+  // 1) 画面切り分け（生徒用 vs 管理者用）
   const urlParams = new URLSearchParams(window.location.search);
   const testId = urlParams.get('testId');
+  const mode = urlParams.get('mode');
 
   if (testId) {
     document.getElementById('view-admin-login').classList.add('hidden');
     document.getElementById('view-student').classList.remove('hidden');
     loadStudentTest(testId);
     setupProctoredEvents();
+  } else if (mode === 'admin') {
+    // 管理者専用画面
+    document.getElementById('view-admin-login').classList.remove('hidden');
+    document.getElementById('view-student').classList.add('hidden');
+  } else {
+    document.getElementById('view-admin-login').classList.remove('hidden');
+    document.getElementById('view-student').classList.add('hidden');
+  }
+
+  // APIキーの読み込み
+  const keyObj = await dbGet('config', 'gemini_api_key');
+  if (keyObj) {
+    document.getElementById('gemini-api-key').value = keyObj.value;
   }
 });
 
 /* ===================================================
-   3. 不正防止・検知機能
+   3. 不正検知機能（タブ離脱・ウィンドウ非アクティブ検知）
 =================================================== */
 function setupProctoredEvents() {
   const triggerViolation = () => {
@@ -446,8 +533,13 @@ function setupProctoredEvents() {
   window.addEventListener('blur', triggerViolation);
 }
 
+/* 右クリック、コピー＆ペーストの制御 */
+document.addEventListener('contextmenu', e => e.preventDefault());
+document.addEventListener('copy', e => e.preventDefault());
+document.addEventListener('paste', e => e.preventDefault());
+
 /* ===================================================
-   4. 生徒用機能
+   4. 生徒用機能 (解答・ランダム表示・自動採点・AI連携)
 =================================================== */
 async function loadStudentTest(testId) {
   currentTest = await dbGet('tests', testId);
@@ -466,10 +558,16 @@ function startExam() {
     return;
   }
 
+  // フルスクリーンリクエスト
+  if (document.documentElement.requestFullscreen) {
+    document.documentElement.requestFullscreen().catch(() => {});
+  }
+
   document.getElementById('student-login').classList.add('hidden');
   document.getElementById('student-exam').classList.remove('hidden');
   document.getElementById('exam-header').innerText = currentTest.title;
 
+  // 問題データおよび選択肢のランダム化（シャッフル）
   const questions = JSON.parse(JSON.stringify(currentTest.questions));
   questions.forEach(q => {
     if (q.options && q.options.length > 0) {
@@ -514,30 +612,55 @@ function renderExamForm(questions) {
   });
 }
 
-const GAS_URL = "https://script.google.com/macros/s/AKfycbxaKWC_EyqAbniAzeFxUffCmzcFexO9HcMLfe76Rsv-uEfBenqJ9ifKXoPvRvftKfrR/exec";
-
 async function submitExam() {
   if (!confirm('回答を提出します。よろしいですか？')) return;
 
   const answers = {};
   let score = 0;
+  const questionResults = [];
 
   currentTest.questions.forEach(q => {
+    let studentAns = '';
+    let isCorrect = false;
+    let markType = 'incorrect'; // perfect, correct, partial, incorrect
+
     if (q.type === 'single') {
       const el = document.querySelector(`input[name="q_${q.id}"]:checked`);
-      answers[q.id] = el ? el.value : '';
-      if (answers[q.id] === q.answer) score++;
+      studentAns = el ? el.value : '';
+      if (studentAns === q.answer) {
+        score++;
+        markType = 'perfect'; // 二重丸/花丸相当
+      }
     } else if (q.type === 'multiple') {
       const els = document.querySelectorAll(`input[name="q_${q.id}"]:checked`);
       const selected = Array.from(els).map(e => e.value).sort().join(',');
-      answers[q.id] = selected;
+      studentAns = selected;
       const correct = q.answer.split(',').map(s => s.trim()).sort().join(',');
-      if (selected === correct) score++;
+      
+      if (selected === correct) {
+        score++;
+        markType = 'perfect';
+      } else if (selected !== '' && correct.includes(selected)) {
+        markType = 'partial'; // 三角(部分点/惜しい)
+      }
     } else if (q.type === 'text') {
       const el = document.querySelector(`input[name="q_${q.id}"]`);
-      answers[q.id] = el ? el.value.trim() : '';
-      if (answers[q.id] === q.answer.trim()) score++;
+      studentAns = el ? el.value.trim() : '';
+      if (studentAns === q.answer.trim()) {
+        score++;
+        markType = 'correct'; // 丸
+      } else if (studentAns !== '' && q.answer.trim().includes(studentAns)) {
+        markType = 'partial'; // 三角
+      }
     }
+
+    answers[q.id] = studentAns;
+    questionResults.push({
+      questionText: q.text,
+      studentAns,
+      correctAns: q.answer,
+      markType
+    });
   });
 
   const record = {
@@ -551,24 +674,82 @@ async function submitExam() {
     submittedAt: new Date().toLocaleString()
   };
 
-  try {
-    await fetch(GAS_URL, {
-      method: 'POST',
-      body: JSON.stringify(record)
-    });
-  } catch (err) {
-    console.error('送信エラー:', err);
-  }
-
+  // IndexedDBへの記録
   await dbPut('answers', record);
 
   document.getElementById('student-exam').classList.add('hidden');
   document.getElementById('student-complete').classList.remove('hidden');
+
+  // 結果表示とAI採点解説処理の呼び出し
+  renderStudentResult(score, currentTest.questions.length, questionResults);
 }
 
-document.addEventListener('contextmenu', e => e.preventDefault());
-document.addEventListener('copy', e => e.preventDefault());
-document.addEventListener('paste', e => e.preventDefault());
+async function renderStudentResult(score, maxScore, questionResults) {
+  document.getElementById('res-score').innerText = `${score} / ${maxScore} 点`;
+  const container = document.getElementById('res-details');
+  container.innerHTML = '';
+
+  const keyObj = await dbGet('config', 'gemini_api_key');
+  const apiKey = keyObj ? keyObj.value : null;
+
+  for (let i = 0; i < questionResults.length; i++) {
+    const item = questionResults[i];
+    const itemDiv = document.createElement('div');
+    itemDiv.className = 'card';
+
+    let markHtml = '';
+    if (item.markType === 'perfect') markHtml = '<span class="mark-icon mark-perfect">◎</span>';
+    else if (item.markType === 'correct') markHtml = '<span class="mark-icon mark-correct">○</span>';
+    else if (item.markType === 'partial') markHtml = '<span class="mark-icon mark-partial">△</span>';
+    else markHtml = '<span class="mark-icon mark-incorrect">✕</span>';
+
+    itemDiv.innerHTML = `
+      <div>${markHtml} <strong>問${i+1}. ${item.questionText}</strong></div>
+      <div style="margin-top:6px;">あなたの回答: <code>${item.studentAns || '(無回答)'}</code></div>
+      <div>模範解答: <code>${item.correctAns}</code></div>
+      <div id="ai-feedback-${i}" class="ai-box">AI解説を取得中...</div>
+    `;
+    container.appendChild(itemDiv);
+
+    // AIによるフィードバック（褒める・改善点）の動的取得
+    fetchAIFeedback(item, i, apiKey);
+  }
+}
+
+async function fetchAIFeedback(item, index, apiKey) {
+  const targetEl = document.getElementById(`ai-feedback-${index}`);
+  if (!apiKey) {
+    targetEl.innerHTML = '<strong>【解説・アドバイス】</strong><br>解答の復習を行いましょう！（※AI詳細解説機能は未設定です）';
+    return;
+  }
+
+  const prompt = `あなたは親切で指導力のある教師です。以下のテスト結果に対してフィードバックを作成してください。
+
+問題文: ${item.questionText}
+生徒の回答: ${item.studentAns}
+正解: ${item.correctAns}
+判定: ${item.markType}
+
+【要件】
+1. 必ず生徒の努力や良い点、意欲をポジティブに褒めてください。
+2. 改善点や、今後どのように勉強すれば良いか具体的なアドバイスを簡潔に記載してください。
+3. 全体で150文字程度で分かりやすくまとめてください。`;
+
+  try {
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }]
+      })
+    });
+    const data = await res.json();
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '解説を取得できませんでした。';
+    targetEl.innerHTML = `<strong>【AI教師からのフィードバック】</strong><br>${text.replace(/\n/g, '<br>')}`;
+  } catch (err) {
+    targetEl.innerHTML = '<strong>【AI解説】</strong> エラーが発生したため解説を取得できませんでした。';
+  }
+}
 
 /* ===================================================
    5. 管理者ログイン・権限管理
@@ -586,16 +767,38 @@ async function loginAdmin() {
     document.getElementById('current-user-display').innerText = `ログイン中: ${account.user}`;
     const badge = document.getElementById('user-role-badge');
     if (account.role === 'super') {
-      badge.innerText = 'おおもと管理者';
+      badge.innerText = '管理者アカウント';
       badge.className = 'badge badge-super';
       document.getElementById('nav-accounts').classList.remove('hidden');
+      document.getElementById('teacher-account-form').classList.add('hidden');
+      document.getElementById('school-admin-account-form').classList.remove('hidden');
+      document.getElementById('nav-create').classList.add('hidden');
+      document.getElementById('nav-tests').classList.add('hidden');
+      document.getElementById('nav-results').classList.add('hidden');
+      document.getElementById('nav-settings').classList.remove('hidden');
+      document.getElementById('api-settings').classList.add('hidden');
+    } else if (account.role === 'schoolAdmin') {
+      badge.innerText = `学校ADMIN: ${account.school}`;
+      badge.className = 'badge badge-school-admin';
+      document.getElementById('nav-accounts').classList.remove('hidden');
+      document.getElementById('teacher-account-form').classList.remove('hidden');
+      document.getElementById('school-admin-account-form').classList.add('hidden');
+      document.getElementById('nav-create').classList.remove('hidden');
+      document.getElementById('nav-tests').classList.remove('hidden');
+      document.getElementById('nav-results').classList.remove('hidden');
+      document.getElementById('nav-settings').classList.remove('hidden');
+      document.getElementById('api-settings').classList.remove('hidden');
     } else {
       badge.innerText = '教員アカウント';
       badge.className = 'badge badge-teacher';
       document.getElementById('nav-accounts').classList.add('hidden');
+      document.getElementById('nav-create').classList.remove('hidden');
+      document.getElementById('nav-tests').classList.remove('hidden');
+      document.getElementById('nav-results').classList.remove('hidden');
+      document.getElementById('nav-settings').classList.remove('hidden');
     }
 
-    showTab('tab-create');
+    showTab(account.role === 'super' ? 'tab-accounts' : 'tab-create');
   } else {
     document.getElementById('login-err').innerText = 'ユーザーIDまたはパスワードが正しくありません。';
   }
@@ -606,18 +809,16 @@ function logoutAdmin() {
 }
 
 function showTab(tabId) {
+  if (currentUser && currentUser.role === 'super' && !['tab-accounts', 'tab-settings'].includes(tabId)) {
+    alert('管理者アカウントは学校ADMIN発行とパスワード変更のみ利用できます。');
+    return;
+  }
   document.querySelectorAll('.admin-tab').forEach(el => el.classList.add('hidden'));
   document.getElementById(tabId).classList.remove('hidden');
 
   if (tabId === 'tab-tests') loadTestList();
   if (tabId === 'tab-results') loadResultTestOptions();
   if (tabId === 'tab-accounts') loadTeacherAccounts();
-  
-  // 追加: 設定タブを開いたときに前回リセット日時を表示
-  if (tabId === 'tab-settings') {
-    const lastReset = localStorage.getItem('last_system_reset_time');
-    document.getElementById('last-system-reset-time').innerText = lastReset ? lastReset : '記録なし';
-  }
 }
 
 function toggleOptionsInput() {
@@ -626,7 +827,7 @@ function toggleOptionsInput() {
 }
 
 /* ===================================================
-   6. テスト・問題作成機能
+   6. テスト・問題作成機能（画像登録対応）
 =================================================== */
 function addQuestionToMemory() {
   const text = document.getElementById('q-text').value.trim();
@@ -689,6 +890,11 @@ function renderTempQuestions() {
 }
 
 async function saveTest() {
+  if (!currentUser || currentUser.role === 'super') {
+    alert('管理者アカウントはテストを作成できません。');
+    return;
+  }
+
   const title = document.getElementById('new-test-title').value.trim();
   if (!title || tempQuestions.length === 0) {
     alert('テスト名と最低1つの問題を追加してください。');
@@ -705,7 +911,7 @@ async function saveTest() {
   };
 
   await dbPut('tests', testData);
-  alert('新しいテストを作成・発行しました！');
+  alert('新しいテストを作成・保存しました！');
 
   tempQuestions = [];
   document.getElementById('new-test-title').value = '';
@@ -714,7 +920,7 @@ async function saveTest() {
 }
 
 /* ===================================================
-   7. テスト一覧 & 配布リンク生成（QRコード生成 & 削除対応）
+   7. テスト一覧、削除、個別URL生成＆QRコード生成
 =================================================== */
 async function loadTestList() {
   const allTests = await dbGetAll('tests');
@@ -728,87 +934,69 @@ async function loadTestList() {
     return;
   }
 
-  container.innerHTML = tests.map(t => {
+  container.innerHTML = '';
+  tests.forEach(t => {
     const studentUrl = `${baseUrl}?testId=${t.id}`;
     const inputId = `link-input-${t.id}`;
-    const qrId = `qr-${t.id}`;
-    return `
-      <div class="card">
-        <h4>${t.title} <small style="font-weight:normal; color:#666;">(問題数: ${t.questions.length} / 作成者: ${t.createdBy})</small></h4>
-        <p><strong>【教員配布用】教科個別テストリンク:</strong></p>
-        <div style="display: flex; gap: 8px; margin-bottom: 8px;">
-          <input type="text" id="${inputId}" value="${studentUrl}" readonly onclick="this.select()" style="margin: 0;">
-          <button class="btn" style="white-space: nowrap;" onclick="copyTestLink('${inputId}')">URLをコピー</button>
-        </div>
-        <div>
-          <strong>QRコード:</strong><br>
-          <div id="${qrId}" class="qr-container"></div>
-        </div>
-        <button class="btn btn-danger" style="margin-top:10px;" onclick="deleteTest('${t.id}')">このテストを削除</button>
+    const qrCanvasId = `qr-${t.id}`;
+
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.innerHTML = `
+      <h4>${t.title} <small style="font-weight:normal; color:#666;">(問題数: ${t.questions.length} / 作成者: ${t.createdBy})</small></h4>
+      <p><strong>【教員配布用】教科個別テストリンク:</strong></p>
+      <div style="display: flex; gap: 8px; margin-bottom: 8px;">
+        <input type="text" id="${inputId}" value="${studentUrl}" readonly onclick="this.select()" style="margin: 0;">
+        <button class="btn" style="white-space: nowrap;" onclick="copyTestLink('${inputId}')">URLをコピー</button>
       </div>
+      <div style="margin-top: 10px;">
+        <strong>【配布用QRコード】</strong>
+        <div id="${qrCanvasId}" class="qr-container"></div>
+      </div>
+      <button class="btn btn-danger" style="margin-top: 15px;" onclick="deleteTest('${t.id}')">このテストを削除</button>
     `;
-  }).join('');
+    container.appendChild(card);
 
-  // 修正ポイント: DOMのレンダリング完了を待ってからQRコードを描画する
-  setTimeout(() => {
-    tests.forEach(t => {
-      const studentUrl = `${baseUrl}?testId=${t.id}`;
-      const qrContainer = document.getElementById(`qr-${t.id}`);
-      if (qrContainer) {
-        qrContainer.innerHTML = '';
-        try {
-          new QRCode(qrContainer, {
-            text: studentUrl,
-            width: 128,
-            height: 128
-          });
-        } catch (e) {
-          console.error('QRコード生成エラー:', e);
-        }
-      }
+    // QRコード生成処理
+    new QRCode(document.getElementById(qrCanvasId), {
+      text: studentUrl,
+      width: 128,
+      height: 128
     });
-  }, 50);
-}
-
-// 追加: テスト削除機能の完全実装
-async function deleteTest(testId) {
-  if (!confirm('このテストを削除しますか？\n（※関連するテスト設定が削除されます）')) return;
-  await dbDelete('tests', testId);
-  loadTestList();
-  loadResultTestOptions();
+  });
 }
 
 function copyTestLink(inputId) {
   const inputElem = document.getElementById(inputId);
   inputElem.select();
-  inputElem.setSelectionRange(0, 99999);
-
   navigator.clipboard.writeText(inputElem.value).then(() => {
     alert('テストリンクをクリップボードにコピーしました！');
-  }).catch(err => {
+  }).catch(() => {
     document.execCommand('copy');
     alert('テストリンクをコピーしました！');
   });
 }
 
+async function deleteTest(testId) {
+  if (!currentUser || currentUser.role === 'super') {
+    alert('管理者アカウントはテストを削除できません。');
+    return;
+  }
+  if (!confirm('このテストおよび登録済みの問題を削除してもよろしいですか？')) return;
+  await dbDelete('tests', testId);
+  loadTestList();
+}
+
 /* ===================================================
-   8. 成績集計・結果分析 (エラー防止 & 画面即時更新)
+   8. 成績集計・結果分析 (棒グラフ・平均点・分析)
 =================================================== */
 async function loadResultTestOptions() {
   const allTests = await dbGetAll('tests');
   const tests = currentUser.role === 'super' ? allTests : allTests.filter(t => t.createdBy === currentUser.user);
   
   const select = document.getElementById('result-test-select');
-  const currentVal = select.value;
-  
   select.innerHTML = '<option value="">-- テストを選択してください --</option>' + 
     tests.map(t => `<option value="${t.id}">${t.title} (${t.createdBy})</option>`).join('');
-  
-  if (tests.some(t => t.id === currentVal)) {
-    select.value = currentVal;
-  } else {
-    document.getElementById('analytics-area').classList.add('hidden');
-  }
 }
 
 async function renderResults() {
@@ -825,40 +1013,34 @@ async function renderResults() {
   const results = allAnswers.filter(a => a.testId === testId);
 
   const count = results.length;
-  const avg = count ? (results.reduce((acc, r) => acc + (r.score || 0), 0) / count).toFixed(1) : 0;
+  const avg = count ? (results.reduce((acc, r) => acc + r.score, 0) / count).toFixed(1) : 0;
 
   document.getElementById('stat-count').innerText = count;
   document.getElementById('stat-avg').innerText = avg;
 
   const scoreCounts = {};
   results.forEach(r => {
-    const s = r.score || 0;
-    scoreCounts[s] = (scoreCounts[s] || 0) + 1;
+    scoreCounts[r.score] = (scoreCounts[r.score] || 0) + 1;
   });
 
-  const canvas = document.getElementById('scoreChart');
-  if (canvas) {
-    const ctx = canvas.getContext('2d');
-    if (currentChart) {
-      currentChart.destroy();
-    }
+  const ctx = document.getElementById('scoreChart').getContext('2d');
+  if (currentChart) currentChart.destroy();
 
-    currentChart = new Chart(ctx, {
-      type: 'bar',
-      data: {
-        labels: Object.keys(scoreCounts).map(s => `${s}点`),
-        datasets: [{
-          label: '人数',
-          data: Object.values(scoreCounts),
-          backgroundColor: '#2563eb'
-        }]
-      },
-      options: {
-        responsive: true,
-        scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } }
-      }
-    });
-  }
+  currentChart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: Object.keys(scoreCounts).map(s => `${s}点`),
+      datasets: [{
+        label: '人数',
+        data: Object.values(scoreCounts),
+        backgroundColor: '#2563eb'
+      }]
+    },
+    options: {
+      responsive: true,
+      scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } }
+    }
+  });
 
   const tableContainer = document.getElementById('student-results-table');
   if (results.length === 0) {
@@ -878,11 +1060,11 @@ async function renderResults() {
         <tbody>
           ${results.map(r => `
             <tr>
-              <td>${r.studentClass || ''}</td>
-              <td>${r.studentName || ''}</td>
-              <td><strong>${r.score || 0}</strong> / ${r.maxScore || 0}</td>
-              <td style="${r.violations > 0 ? 'color:var(--danger); font-weight:bold;' : ''}">${r.violations || 0} 回</td>
-              <td>${r.submittedAt || ''}</td>
+              <td>${r.studentClass}</td>
+              <td>${r.studentName}</td>
+              <td><strong>${r.score}</strong> / ${r.maxScore}</td>
+              <td style="${r.violations > 0 ? 'color:var(--danger); font-weight:bold;' : ''}">${r.violations} 回</td>
+              <td>${r.submittedAt}</td>
             </tr>
           `).join('')}
         </tbody>
@@ -925,7 +1107,6 @@ async function renderResetLogs(testId) {
   `;
 }
 
-// 成績リセット処理の修正
 async function resetTestResults() {
   const testId = document.getElementById('result-test-select').value;
   if (!testId) return;
@@ -939,66 +1120,38 @@ async function resetTestResults() {
     return;
   }
 
-  const confirm1 = confirm(`【警告】テスト「${test ? test.title : ''}」の成績データ (${targetAnswers.length}件) をすべて消去しますか？\nこの操作は取り消せません。`);
-  if (!confirm1) return;
-
-  const confirm2 = prompt(`本当に削除する場合は「削除」と入力してください。`);
-  if (confirm2 !== '削除') {
-    alert('入力が一致しないため、リセット処理をキャンセルしました。');
+  if (!confirm(`【警告】テスト「${test.title}」の成績データ (${targetAnswers.length}件) を削除しますか？`)) return;
+  const confirmText = prompt(`本当に削除する場合は「削除」と入力してください。`);
+  if (confirmText !== '削除') {
+    alert('キャンセルされました。');
     return;
   }
 
-  // 1. レコードの削除処理
   for (const ans of targetAnswers) {
     await dbDelete('answers', ans.id);
   }
 
-  // 2. リセットログの保存
-  const logData = {
+  await dbPut('reset_logs', {
     testId: testId,
-    testTitle: test ? test.title : '',
+    testTitle: test.title,
     executedBy: currentUser ? currentUser.user : '不明',
     deletedCount: targetAnswers.length,
     timestamp: new Date().toLocaleString()
-  };
-  await dbPut('reset_logs', logData);
+  });
 
-  alert('成績データをリセットし、ログを記録しました。');
-
-  // 3. 画面の即時更新（グラフとテーブルを確実に再描画）
-  await renderResults();
-}
-
-// 全データ初期化処理の修正
-async function resetAllData() {
-  if (!confirm('警告: すべてのテスト・回答履歴・追加アカウント情報が削除されます。本当に実行しますか？')) return;
-
-  // 修正ポイント: DB接続が開いたままだとブロックされるため、先に切断する
-  if (db) {
-    db.close();
-  }
-
-  const req = indexedDB.deleteDatabase(DB_NAME);
-  
-  req.onsuccess = () => {
-    alert('データベースを完全に初期化しました。');
-    location.reload();
-  };
-  
-  req.onerror = () => {
-    alert('データベースの初期化に失敗しました。');
-  };
-  
-  req.onblocked = () => {
-    // 別のタブ等でDBが開かれている場合の警告
-    alert('データベースがブロックされています。他のタブでこのページを開いている場合は閉じてから再実行してください。');
-  };
+  alert('成績データをリセットしました。');
+  renderResults();
 }
 
 /* ===================================================
-   9. 教員アカウント管理
+  9. 教員・学校ADMINアカウント管理
 =================================================== */
 async function createTeacherAccount() {
+  if (!currentUser || currentUser.role !== 'schoolAdmin') {
+    alert('教員アカウントを管理できる権限がありません。');
+    return;
+  }
+
   const u = document.getElementById('new-teacher-id').value.trim();
   const p = document.getElementById('new-teacher-pass').value.trim();
 
@@ -1009,48 +1162,100 @@ async function createTeacherAccount() {
 
   const existing = await dbGet('admins', u);
   if (existing) {
-    alert('そのユーザーIDは既に使用されています。別のIDを指定してください。');
+    alert('そのユーザーIDは既に使用されています。');
     return;
   }
 
-  await dbPut('admins', { user: u, pass: p, role: 'teacher' });
-  alert(`教員アカウント [${u}] を正常に作成しました。`);
+  await dbPut('admins', { user: u, pass: p, role: 'teacher', school: currentUser.school });
+  alert(`教員アカウント [${u}]（${currentUser.school}）を作成しました。`);
   
   document.getElementById('new-teacher-id').value = '';
   document.getElementById('new-teacher-pass').value = '';
-  
+  loadTeacherAccounts();
+}
+
+async function createSchoolAdminAccount() {
+  if (!currentUser || currentUser.role !== 'super') {
+    alert('学校ADMINアカウントを発行できる権限がありません。');
+    return;
+  }
+
+  const school = document.getElementById('new-school-name').value.trim();
+  const u = document.getElementById('new-school-admin-id').value.trim();
+  const p = document.getElementById('new-school-admin-pass').value.trim();
+
+  if (!school || !u || !p) {
+    alert('学校名、ADMINユーザーID、初期パスワードをすべて入力してください。');
+    return;
+  }
+
+  const existing = await dbGet('admins', u);
+  if (existing) {
+    alert('そのユーザーIDは既に使用されています。');
+    return;
+  }
+
+  await dbPut('admins', { user: u, pass: p, role: 'schoolAdmin', school });
+  alert(`学校ADMINアカウント [${u}]（${school}）を発行しました。`);
+
+  document.getElementById('new-school-name').value = '';
+  document.getElementById('new-school-admin-id').value = '';
+  document.getElementById('new-school-admin-pass').value = '';
   loadTeacherAccounts();
 }
 
 async function loadTeacherAccounts() {
   const admins = await dbGetAll('admins');
-  const teachers = admins.filter(a => a.role === 'teacher');
+  const accounts = currentUser.role === 'super'
+    ? admins.filter(a => a.role === 'schoolAdmin')
+    : admins.filter(a => a.role === 'teacher' && a.school === currentUser.school);
   const list = document.getElementById('teacher-accounts-list');
 
-  if (teachers.length === 0) {
-    list.innerHTML = '<p>登録されている教員アカウントはありません。</p>';
+  if (accounts.length === 0) {
+    list.innerHTML = currentUser.role === 'super'
+      ? '<p>登録されている学校ADMINアカウントはありません。</p>'
+      : '<p>登録されている教員アカウントはありません。</p>';
     return;
   }
 
-  list.innerHTML = teachers.map(t => `
+  list.innerHTML = accounts.map(t => `
     <div class="card" style="display:flex; justify-content:space-between; align-items:center;">
-      <div>
-        <strong>教員ID: ${t.user}</strong>
-      </div>
-      <button class="btn btn-danger" onclick="deleteTeacher('${t.user}')">アカウント削除</button>
+      <div><strong>${t.role === 'schoolAdmin' ? '学校ADMIN' : '教員'}: ${t.user}</strong>${t.school ? `<br><small>学校: ${t.school}</small>` : ''}</div>
+      ${currentUser.role === 'schoolAdmin' ? `<button class="btn btn-danger" onclick="deleteTeacher('${t.user}')">アカウント削除</button>` : ''}
     </div>
   `).join('');
 }
 
 async function deleteTeacher(user) {
+  if (!currentUser || currentUser.role !== 'schoolAdmin') {
+    alert('教員アカウントを削除できる権限がありません。');
+    return;
+  }
+
+  const account = await dbGet('admins', user);
+  if (!account || account.role !== 'teacher' || account.school !== currentUser.school) {
+    alert('自校の教員アカウントのみ削除できます。');
+    return;
+  }
+
   if (!confirm(`教員アカウント [${user}] を削除しますか？`)) return;
   await dbDelete('admins', user);
   loadTeacherAccounts();
 }
 
 /* ===================================================
-   10. パスワード変更 & 全データ初期化
+   10. 設定・APIキー・パスワード変更・全データ初期化
 =================================================== */
+async function saveApiKey() {
+  if (currentUser && currentUser.role === 'super') {
+    alert('管理者アカウントはAPIキーを変更できません。');
+    return;
+  }
+  const key = document.getElementById('gemini-api-key').value.trim();
+  await dbPut('config', { key: 'gemini_api_key', value: key });
+  alert('APIキーを保存しました。');
+}
+
 async function changePassword() {
   const curr = document.getElementById('pass-current').value;
   const next = document.getElementById('pass-new').value;
@@ -1071,43 +1276,8 @@ async function changePassword() {
   document.getElementById('pass-new').value = '';
 }
 
-// 全データ初期化処理の修正版
 async function resetAllData() {
-  // 1. ワンクッション目 (確認ダイアログ)
-  if (!confirm('【警告】すべてのテスト・回答履歴・追加アカウント情報が削除されます。\n本当に実行しますか？')) return;
-
-  // 2. 二重確認 (ワンクッション目：文字列入力チェック)
-  const input = prompt('本当にシステムデータを初期化する場合は「リセット」と入力してください。');
-  if (input !== 'リセット') {
-    alert('入力内容が一致しないため、リセット処理をキャンセルしました。');
-    return;
-  }
-
-  // リセット実行日時を localStorage に保存 (DB削除の影響を受けない)
-  const now = new Date().toLocaleString();
-  localStorage.setItem('last_system_reset_time', now);
-
-  // DB接続が開いている場合は閉じる
-  if (db) {
-    db.close();
-  }
-
-  const req = indexedDB.deleteDatabase(DB_NAME);
-
-  req.onsuccess = async () => {
-    // 3. ログイン不能バグ防止策: データベースを再構築して初期アカウントを確実に流し込んでからリロードする
-    await initDB();
-    alert(`データベースを完全に初期化しました。\n初期アカウント（admin / admin123）で再ログインが可能です。\n(リセット日時: ${now})`);
-    location.reload();
-  };
-
-  req.onerror = () => {
-    alert('データベースの初期化に失敗しました。');
-  };
-
-  req.onblocked = () => {
-    alert('データベースがブロックされています。他のタブでこのページを開いている場合は閉じてから再実行してください。');
-  };
+  alert('すべてのアカウントでシステムデータの初期化はできません。');
 }
 </script>
 </body>
