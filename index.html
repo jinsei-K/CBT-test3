@@ -54,7 +54,7 @@
       color: var(--text);
       margin: 0;
       padding: 20px;
-      user-select: none; /* コピー・テキスト選択防止 */
+      user-select: none;
     }
     .theme-toggle {
       position: fixed;
@@ -126,6 +126,7 @@
       background: var(--input-bg);
       color: var(--text);
     }
+    input, textarea { user-select: text; }
     input::placeholder, textarea::placeholder { color: var(--muted-text); }
     .card {
       border: 1px solid var(--border);
@@ -170,9 +171,39 @@
     .mark-incorrect { color: #dc2626; } /* ✕ 不正解 */
     .qr-container { margin-top: 10px; display: flex; justify-content: center; background: white; padding: 10px; }
     .ai-box { background: var(--ai-bg); border: 1px solid var(--ai-border); padding: 12px; border-radius: 6px; margin-top: 10px; }
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 100;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      background: rgba(15, 23, 42, 0.58);
+    }
+    .modal {
+      width: min(100%, 460px);
+      padding: 24px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: var(--card);
+      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.24);
+    }
+    .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
   </style>
 </head>
 <body>
+
+<div id="in-page-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="in-page-modal-title">
+  <div class="modal">
+    <h3 id="in-page-modal-title">確認</h3>
+    <p id="in-page-modal-message"></p>
+    <div class="modal-actions">
+      <button id="in-page-modal-cancel" class="btn btn-secondary" type="button" onclick="resolveInPageConfirm(false)">キャンセル</button>
+      <button id="in-page-modal-ok" class="btn btn-success" type="button" onclick="resolveInPageConfirm(true)">OK</button>
+    </div>
+  </div>
+</div>
 
 <button class="theme-toggle" id="theme-toggle" type="button" onclick="toggleTheme()" aria-label="表示テーマを切り替える"></button>
 
@@ -202,7 +233,7 @@
           <button class="btn" onclick="showStudentTab('student-settings-tab')">設定</button>
         </nav>
         <div id="student-tests-tab" class="student-tab">
-          <div class="card"><h3>参加中のクラス</h3><p id="student-classes">参加中のクラスはありません。</p><label>クラス参加コード</label><input type="text" id="join-class-code" placeholder="クラス参加コード"><button class="btn" onclick="joinClass()">クラスに参加</button></div>
+          <div class="card"><h3>参加中のクラス</h3><p id="student-classes">参加中のクラスはありません。</p><label>クラス参加コード</label><input type="text" id="join-class-code" class="copyable-input" autocomplete="off" placeholder="クラス参加コード"><button class="btn" onclick="joinClass()">クラスに参加</button></div>
           <h3>受験できるテスト</h3><div id="available-tests"></div>
         </div>
         <div id="student-history-tab" class="student-tab hidden"><h3>受験履歴</h3><div id="student-history"></div></div>
@@ -285,6 +316,8 @@
       <h3>新規テストの作成</h3>
       <label>教科 / テスト名</label>
       <input type="text" id="new-test-title" placeholder="例: 数学Ⅰ 期末試験 / 英語 単語テスト">
+      <label>タグ（カンマ区切り）</label>
+      <input type="text" id="new-test-tags" placeholder="例: 数学, 1学期, 定期テスト">
 
       <label>公開対象クラス</label>
       <select id="new-test-classes" multiple size="4"></select>
@@ -330,6 +363,14 @@
     <div id="tab-tests" class="admin-tab hidden">
       <h3>発行済みテスト一覧</h3>
       <p style="color:var(--muted-text); font-size:0.9em;">※ 各テストごとに教科・試験用の個別URLおよびQRコードが生成されます。</p>
+      <div class="card">
+        <label>テスト名</label>
+        <input type="text" id="test-search-title" oninput="loadTestList()" placeholder="テスト名で検索">
+        <label>タグ</label>
+        <input type="text" id="test-search-tag" oninput="loadTestList()" placeholder="タグで検索">
+        <label>作成日</label>
+        <input type="date" id="test-search-date" oninput="loadTestList()">
+      </div>
       <div id="test-list"></div>
     </div>
 
@@ -358,7 +399,7 @@
 
         <div style="display:flex; justify-content:space-between; align-items:center; margin-top: 30px;">
           <h4>生徒別成績・解答明細</h4>
-          <button class="btn btn-success" onclick="publishTestScores()">点数を公開</button>
+          <button class="btn btn-success" id="score-publication-button" onclick="toggleTestScores()">点数を公開</button>
           <button class="btn btn-danger" onclick="resetTestResults()">このテストの成績をリセット</button>
         </div>
         <div id="student-results-table"></div>
@@ -545,8 +586,43 @@ let currentStudent = null;
 let currentTest = null;
 let tempQuestions = [];
 let violationCount = 0;
+let suppressProctoring = false;
+let inPageConfirmResolver = null;
 let currentChart = null;
 let editingTestId = null;
+
+function showInPageConfirm(message) {
+  return new Promise(resolve => {
+    inPageConfirmResolver = resolve;
+    document.getElementById('in-page-modal-title').innerText = '確認';
+    document.getElementById('in-page-modal-cancel').classList.remove('hidden');
+    document.getElementById('in-page-modal-ok').innerText = 'OK';
+    document.getElementById('in-page-modal-message').innerText = message;
+    document.getElementById('in-page-modal').classList.remove('hidden');
+    document.getElementById('in-page-modal-ok').focus();
+  });
+}
+
+function showInPageNotice(message, title = 'お知らせ') {
+  document.getElementById('in-page-modal-title').innerText = title;
+  document.getElementById('in-page-modal-cancel').classList.add('hidden');
+  document.getElementById('in-page-modal-ok').innerText = '閉じる';
+  document.getElementById('in-page-modal-message').innerText = message;
+  document.getElementById('in-page-modal').classList.remove('hidden');
+  inPageConfirmResolver = () => {
+    inPageConfirmResolver = null;
+    document.getElementById('in-page-modal').classList.add('hidden');
+  };
+  document.getElementById('in-page-modal-ok').focus();
+}
+
+function resolveInPageConfirm(result) {
+  if (!inPageConfirmResolver) return;
+  const resolve = inPageConfirmResolver;
+  inPageConfirmResolver = null;
+  document.getElementById('in-page-modal').classList.add('hidden');
+  resolve(result);
+}
 
 function applyTheme(theme) {
   const isDark = theme === 'dark';
@@ -571,7 +647,11 @@ window.addEventListener('DOMContentLoaded', async () => {
   const testId = urlParams.get('testId');
   const mode = urlParams.get('mode');
 
-  if (mode === 'admin') {
+  const savedStudent = sessionStorage.getItem('cbt-student-session');
+  const savedAdmin = sessionStorage.getItem('cbt-admin-session');
+  const shouldRestoreAdmin = Boolean(savedAdmin) && !savedStudent;
+
+  if (mode === 'admin' || shouldRestoreAdmin) {
     // 管理者専用画面
     document.getElementById('view-admin-login').classList.remove('hidden');
     document.getElementById('view-student').classList.add('hidden');
@@ -585,6 +665,18 @@ window.addEventListener('DOMContentLoaded', async () => {
   if (keyObj) {
     document.getElementById('gemini-api-key').value = keyObj.value;
   }
+
+  if (savedStudent) {
+    const session = JSON.parse(savedStudent);
+    document.getElementById('student-user-input').value = session.user;
+    document.getElementById('student-pass-input').value = session.pass;
+    await loginStudent();
+  } else if (savedAdmin) {
+    const session = JSON.parse(savedAdmin);
+    document.getElementById('admin-user-input').value = session.user;
+    document.getElementById('admin-pass-input').value = session.pass;
+    await loginAdmin();
+  }
 });
 
 /* ===================================================
@@ -592,7 +684,7 @@ window.addEventListener('DOMContentLoaded', async () => {
 =================================================== */
 function setupProctoredEvents() {
   const triggerViolation = () => {
-    if (document.getElementById('student-exam').classList.contains('hidden')) return;
+    if (suppressProctoring || document.getElementById('student-exam').classList.contains('hidden')) return;
     violationCount++;
     document.getElementById('violation-count').innerText = violationCount;
     document.getElementById('violation-warning').classList.remove('hidden');
@@ -605,10 +697,23 @@ function setupProctoredEvents() {
   window.addEventListener('blur', triggerViolation);
 }
 
+document.addEventListener('fullscreenchange', () => {
+  if (!suppressProctoring && !document.getElementById('student-exam').classList.contains('hidden') && !document.fullscreenElement) {
+    violationCount++;
+    document.getElementById('violation-count').innerText = violationCount;
+    document.getElementById('violation-warning').classList.remove('hidden');
+    showInPageNotice('全画面モードが解除されたため、不正として記録しました。', '不正検知');
+  }
+});
+
 /* 右クリック、コピー＆ペーストの制御 */
 document.addEventListener('contextmenu', e => e.preventDefault());
-document.addEventListener('copy', e => e.preventDefault());
-document.addEventListener('paste', e => e.preventDefault());
+document.addEventListener('copy', e => {
+  if (document.getElementById('student-exam')?.contains(e.target)) e.preventDefault();
+});
+document.addEventListener('paste', e => {
+  if (document.getElementById('student-exam')?.contains(e.target)) e.preventDefault();
+});
 
 /* ===================================================
    4. 生徒用機能 (解答・ランダム表示・自動採点・AI連携)
@@ -622,6 +727,7 @@ async function loginStudent() {
     return;
   }
   currentStudent = account;
+  sessionStorage.setItem('cbt-student-session', JSON.stringify({ user: account.user, pass }));
   document.getElementById('student-login-err').innerText = '';
   document.getElementById('student-auth-form').classList.add('hidden');
   document.getElementById('student-portal').classList.remove('hidden');
@@ -637,7 +743,13 @@ function showStudentTab(tabId) {
 }
 
 function logoutStudent() {
+  sessionStorage.removeItem('cbt-student-session');
   location.reload();
+}
+
+async function hasSubmittedTest(testId, studentUser) {
+  const answers = await dbGetAll('answers');
+  return answers.some(answer => answer.testId === testId && answer.studentUser === studentUser);
 }
 
 function renderStudentClasses() {
@@ -687,7 +799,10 @@ function switchLoginView(view) {
 
 async function renderAvailableTests() {
   const tests = await dbGetAll('tests');
-  const available = tests.filter(test => isTestOpen(test) && (test.classIds || []).includes(currentStudent.classId));
+  const available = [];
+  for (const test of tests) {
+    if (isTestOpen(test) && (test.classIds || []).includes(currentStudent.classId) && !(await hasSubmittedTest(test.id, currentStudent.user))) available.push(test);
+  }
   const container = document.getElementById('available-tests');
   container.innerHTML = available.length ? available.map(test => `
     <div class="card">
@@ -704,7 +819,18 @@ async function beginStudentTest(testId) {
     alert('このテストは現在受験できません。');
     return;
   }
+  if (await hasSubmittedTest(testId, currentStudent.user)) {
+    alert('このテストはすでに解答済みです。');
+    await renderAvailableTests();
+    return;
+  }
   currentTest = test;
+  violationCount = 0;
+  if (!document.documentElement.requestFullscreen) {
+    alert('このブラウザーは全画面モードに対応していないため、受験を開始できません。');
+    return;
+  }
+  try { await document.documentElement.requestFullscreen(); } catch (error) { alert('全画面モードを開始できないため、受験を開始できません。'); return; }
   document.getElementById('student-portal').classList.add('hidden');
   document.getElementById('student-exam').classList.remove('hidden');
   document.getElementById('exam-header').innerText = currentTest.title;
@@ -790,7 +916,16 @@ async function submitExam() {
     await renderAvailableTests();
     return;
   }
-  if (!confirm('回答を提出します。よろしいですか？')) return;
+  if (await hasSubmittedTest(currentTest.id, currentStudent.user)) {
+    alert('このテストはすでに提出済みです。');
+    return;
+  }
+  suppressProctoring = true;
+  const confirmed = await showInPageConfirm('回答を提出します。よろしいですか？');
+  if (!confirmed) {
+    suppressProctoring = false;
+    return;
+  }
 
   const answers = {};
   const questionScores = {};
@@ -859,6 +994,8 @@ async function submitExam() {
 
   document.getElementById('student-exam').classList.add('hidden');
   document.getElementById('student-complete').classList.remove('hidden');
+  if (document.fullscreenElement) await document.exitFullscreen();
+  suppressProctoring = false;
 
   // 結果表示とAI採点解説処理の呼び出し
   renderStudentResult(score, currentTest.questions.length, questionResults);
@@ -942,6 +1079,7 @@ async function loginAdmin() {
   const account = await dbGet('admins', u);
   if (account && account.pass === p) {
     currentUser = account;
+    sessionStorage.setItem('cbt-admin-session', JSON.stringify({ user: account.user, pass: p }));
     document.getElementById('view-admin-login').classList.add('hidden');
     document.getElementById('view-admin-dashboard').classList.remove('hidden');
     
@@ -996,6 +1134,7 @@ async function loginAdmin() {
 }
 
 function logoutAdmin() {
+  sessionStorage.removeItem('cbt-admin-session');
   location.reload();
 }
 
@@ -1045,8 +1184,8 @@ function addQuestionToMemory() {
   const answer = document.getElementById('q-answer').value.trim();
   const fileInput = document.getElementById('q-image');
 
-  if (!text || !answer) {
-    alert('問題文と正解を両方入力してください。');
+  if (!text || (type !== 'text' && !answer)) {
+    alert(type === 'text' ? '問題文を入力してください。' : '問題文と正解を両方入力してください。');
     return;
   }
 
@@ -1309,6 +1448,7 @@ async function saveTest() {
   }
 
   const title = document.getElementById('new-test-title').value.trim();
+  const tags = document.getElementById('new-test-tags').value.split(',').map(tag => tag.trim()).filter(Boolean);
   const classIds = Array.from(document.getElementById('new-test-classes').selectedOptions).map(option => option.value);
   const publishAt = document.getElementById('new-test-publish-at').value;
   const closeAt = document.getElementById('new-test-close-at').value;
@@ -1325,17 +1465,21 @@ async function saveTest() {
     return;
   }
 
+  const existingTest = editingTestId ? await dbGet('tests', editingTestId) : null;
   const testId = editingTestId || 'test_' + Date.now();
   const testData = {
     id: testId,
     title,
-    createdBy: currentUser.user,
+    tags,
+    createdBy: existingTest ? existingTest.createdBy : currentUser.user,
+    school: existingTest ? existingTest.school : currentUser.school || null,
     questions: tempQuestions,
     classIds,
     publishAt: publishAt || null,
     closeAt: closeAt || null,
     status: publishAt && new Date(publishAt) > new Date() ? 'scheduled' : 'published',
-    createdAt: editingTestId ? (await dbGet('tests', editingTestId)).createdAt : new Date().toLocaleString()
+    createdAt: existingTest ? existingTest.createdAt : new Date().toLocaleString(),
+    createdAtDate: existingTest ? existingTest.createdAtDate : new Date().toISOString().slice(0, 10)
   };
 
   await dbPut('tests', testData);
@@ -1344,6 +1488,7 @@ async function saveTest() {
   tempQuestions = [];
   editingTestId = null;
   document.getElementById('new-test-title').value = '';
+  document.getElementById('new-test-tags').value = '';
   document.getElementById('new-test-classes').selectedIndex = -1;
   document.getElementById('new-test-publish-at').value = '';
   document.getElementById('new-test-close-at').value = '';
@@ -1356,7 +1501,18 @@ async function saveTest() {
 =================================================== */
 async function loadTestList() {
   const allTests = await dbGetAll('tests');
-  const tests = allTests.filter(t => t.createdBy === currentUser.user);
+  const admins = await dbGetAll('admins');
+  const titleQuery = document.getElementById('test-search-title')?.value.trim().toLowerCase() || '';
+  const tagQuery = document.getElementById('test-search-tag')?.value.trim().toLowerCase() || '';
+  const dateQuery = document.getElementById('test-search-date')?.value || '';
+  const tests = allTests.filter(t => {
+    const creator = admins.find(admin => admin.user === t.createdBy);
+    const visible = currentUser.role === 'schoolAdmin'
+      ? t.school === currentUser.school || creator?.school === currentUser.school
+      : t.createdBy === currentUser.user;
+    const createdDate = t.createdAtDate || '';
+    return visible && (!titleQuery || t.title.toLowerCase().includes(titleQuery)) && (!tagQuery || (t.tags || []).some(tag => tag.toLowerCase().includes(tagQuery))) && (!dateQuery || createdDate === dateQuery);
+  });
   const classes = await dbGetAll('classes');
 
   const container = document.getElementById('test-list');
@@ -1376,7 +1532,7 @@ async function loadTestList() {
     card.className = 'card';
     card.innerHTML = `
       <h4>${t.title} <small style="font-weight:normal; color:#666;">(問題数: ${t.questions.length})</small></h4>
-      <p>対象クラス: ${targetClasses || '未設定'}<br>状態: <strong>${statusText}</strong><br>公開開始: ${t.publishAt || '即時'}<br>公開終了: ${t.closeAt || '設定なし'}</p>
+      <p>作成者: ${t.createdBy}<br>タグ: ${(t.tags || []).join(', ') || 'なし'}<br>対象クラス: ${targetClasses || '未設定'}<br>状態: <strong>${statusText}</strong><br>公開開始: ${t.publishAt || '即時'}<br>公開終了: ${t.closeAt || '設定なし'}</p>
       <button class="btn" onclick="editTest('${t.id}')">編集</button>
       <button class="btn btn-secondary" onclick="toggleTestPublication('${t.id}')">${t.status === 'published' ? '非公開にする' : '公開する'}</button>
       <button class="btn btn-danger" style="margin-top: 15px;" onclick="deleteTest('${t.id}')">このテストを削除</button>
@@ -1387,9 +1543,10 @@ async function loadTestList() {
 
 async function editTest(testId) {
   const test = await dbGet('tests', testId);
-  if (!test || test.createdBy !== currentUser.user) return;
+  if (!test || !(test.createdBy === currentUser.user || currentUser.role === 'schoolAdmin' && test.school === currentUser.school)) return;
   editingTestId = testId;
   document.getElementById('new-test-title').value = test.title;
+  document.getElementById('new-test-tags').value = (test.tags || []).join(', ');
   await loadClassOptions();
   Array.from(document.getElementById('new-test-classes').options).forEach(option => { option.selected = (test.classIds || []).includes(option.value); });
   document.getElementById('new-test-publish-at').value = test.publishAt || '';
@@ -1401,11 +1558,15 @@ async function editTest(testId) {
 
 async function toggleTestPublication(testId) {
   const test = await dbGet('tests', testId);
-  if (!test || test.createdBy !== currentUser.user) return;
-  test.status = test.status === 'published' ? 'draft' : 'published';
-  if (test.status === 'published' && test.closeAt && new Date(test.closeAt) <= new Date()) test.closeAt = null;
+  if (!test || !(test.createdBy === currentUser.user || currentUser.role === 'schoolAdmin' && test.school === currentUser.school)) return;
+  const shouldPublish = test.status !== 'published';
+  test.status = shouldPublish ? 'published' : 'draft';
+  if (shouldPublish) {
+    test.publishAt = null;
+    if (test.closeAt && new Date(test.closeAt) <= new Date()) test.closeAt = null;
+  }
   await dbPut('tests', test);
-  loadTestList();
+  await loadTestList();
 }
 
 async function deleteTest(testId) {
@@ -1423,7 +1584,10 @@ async function deleteTest(testId) {
 =================================================== */
 async function loadResultTestOptions() {
   const allTests = await dbGetAll('tests');
-  const tests = currentUser.role === 'super' ? allTests : allTests.filter(t => t.createdBy === currentUser.user);
+  const admins = await dbGetAll('admins');
+  const tests = currentUser.role === 'schoolAdmin'
+    ? allTests.filter(t => t.school === currentUser.school || admins.find(admin => admin.user === t.createdBy)?.school === currentUser.school)
+    : currentUser.role === 'super' ? allTests : allTests.filter(t => t.createdBy === currentUser.user);
   
   const select = document.getElementById('result-test-select');
   select.innerHTML = '<option value="">-- テストを選択してください --</option>' + 
@@ -1446,6 +1610,12 @@ async function renderResults() {
   area.classList.remove('hidden');
   const allAnswers = await dbGetAll('answers');
   const results = allAnswers.filter(a => a.testId === testId);
+  const publicationButton = document.getElementById('score-publication-button');
+  if (publicationButton) {
+    const isPublished = results.length > 0 && results.every(answer => answer.scorePublished);
+    publicationButton.innerText = isPublished ? '点数を非公開にする' : '点数を公開';
+    publicationButton.className = isPublished ? 'btn btn-secondary' : 'btn btn-success';
+  }
 
   const count = results.length;
   const avg = count ? (results.reduce((acc, r) => acc + r.score, 0) / count).toFixed(1) : 0;
@@ -1559,6 +1729,22 @@ async function publishTestScores() {
   }
   alert('点数を公開しました。');
   renderResults();
+}
+
+async function toggleTestScores() {
+  const testId = document.getElementById('result-test-select').value;
+  const answers = (await dbGetAll('answers')).filter(answer => answer.testId === testId);
+  if (!answers.length) {
+    alert('対象テストの成績データがありません。');
+    return;
+  }
+  const shouldPublish = !answers.every(answer => answer.scorePublished);
+  for (const answer of answers) {
+    answer.scorePublished = shouldPublish;
+    await dbPut('answers', answer);
+  }
+  alert(shouldPublish ? '点数を公開しました。' : '点数を非公開にしました。');
+  await renderResults();
 }
 
 function renderQuestionAnalysis(test, results) {
