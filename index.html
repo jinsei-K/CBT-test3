@@ -198,6 +198,7 @@
   <div class="modal">
     <h3 id="in-page-modal-title">確認</h3>
     <p id="in-page-modal-message"></p>
+    <input id="in-page-modal-input" class="hidden" type="text" autocomplete="off">
     <div class="modal-actions">
       <button id="in-page-modal-cancel" class="btn btn-secondary" type="button" onclick="resolveInPageConfirm(false)">キャンセル</button>
       <button id="in-page-modal-ok" class="btn btn-success" type="button" onclick="resolveInPageConfirm(true)">OK</button>
@@ -378,7 +379,7 @@
     <div id="tab-results" class="admin-tab hidden">
       <h3>成績集計・分析ダッシュボード</h3>
       <label>分析するテストを選択</label>
-      <select id="result-test-select" onchange="renderResults()"></select>
+      <select id="result-test-select" onchange="switchResultTest()"></select>
 
       <div id="analytics-area" class="hidden">
         <div style="display:flex; gap:20px; margin: 15px 0;">
@@ -461,13 +462,15 @@
         <h4>生徒名簿からアカウントを一括発行</h4>
         <label>名簿ファイル（Excel / CSV）</label>
         <input type="file" id="student-roster-file" accept=".xlsx,.xls,.csv">
-        <small>1行目に「学籍番号」「氏名」「誕生日」の列を用意してください。誕生日はYYYYMMDD、YYYY/MM/DD、YYYY-MM-DDに対応します。</small>
+        <small>1行目に「出席番号」「学籍番号」「氏名」「誕生日」の列を用意してください。誕生日はYYYYMMDD、YYYY/MM/DD、YYYY-MM-DDに対応します。</small>
         <button class="btn btn-success" onclick="importStudentRoster()">名簿を読み込み生徒を発行</button>
       </div>
       <div class="card">
         <h4>生徒アカウントを手入力で発行</h4>
         <label>学籍番号（生徒ID）</label>
         <input type="text" id="manual-student-id" placeholder="例: 2026001">
+        <label>出席番号</label>
+        <input type="number" id="manual-student-attendance-number" min="1" step="1" placeholder="例: 1">
         <label>氏名</label>
         <input type="text" id="manual-student-name" placeholder="例: 山田 太郎">
         <label>誕生日</label>
@@ -597,9 +600,25 @@ function showInPageConfirm(message) {
     document.getElementById('in-page-modal-title').innerText = '確認';
     document.getElementById('in-page-modal-cancel').classList.remove('hidden');
     document.getElementById('in-page-modal-ok').innerText = 'OK';
+    document.getElementById('in-page-modal-input').classList.add('hidden');
     document.getElementById('in-page-modal-message').innerText = message;
     document.getElementById('in-page-modal').classList.remove('hidden');
     document.getElementById('in-page-modal-ok').focus();
+  });
+}
+
+function showInPagePrompt(message, defaultValue = '') {
+  return new Promise(resolve => {
+    inPageConfirmResolver = result => resolve(result ? document.getElementById('in-page-modal-input').value : null);
+    document.getElementById('in-page-modal-title').innerText = '入力';
+    document.getElementById('in-page-modal-cancel').classList.remove('hidden');
+    document.getElementById('in-page-modal-ok').innerText = '決定';
+    const input = document.getElementById('in-page-modal-input');
+    input.value = defaultValue;
+    input.classList.remove('hidden');
+    document.getElementById('in-page-modal-message').innerText = message;
+    document.getElementById('in-page-modal').classList.remove('hidden');
+    input.focus();
   });
 }
 
@@ -607,6 +626,7 @@ function showInPageNotice(message, title = 'お知らせ') {
   document.getElementById('in-page-modal-title').innerText = title;
   document.getElementById('in-page-modal-cancel').classList.add('hidden');
   document.getElementById('in-page-modal-ok').innerText = '閉じる';
+  document.getElementById('in-page-modal-input').classList.add('hidden');
   document.getElementById('in-page-modal-message').innerText = message;
   document.getElementById('in-page-modal').classList.remove('hidden');
   inPageConfirmResolver = () => {
@@ -615,6 +635,8 @@ function showInPageNotice(message, title = 'お知らせ') {
   };
   document.getElementById('in-page-modal-ok').focus();
 }
+
+window.alert = message => showInPageNotice(String(message));
 
 function resolveInPageConfirm(result) {
   if (!inPageConfirmResolver) return;
@@ -867,7 +889,7 @@ async function reviewStudentResult(answerId) {
 }
 
 async function changeStudentPassword() {
-  const next = prompt('新しいパスワードを入力してください。');
+  const next = await showInPagePrompt('新しいパスワードを入力してください。');
   if (!next) return;
   currentStudent.pass = next;
   await dbPut('students', currentStudent);
@@ -1290,7 +1312,7 @@ async function copyClassCode(classId) {
 async function rotateClassCode(classId) {
   const classItem = await dbGet('classes', classId);
   if (!classItem || classItem.owner !== currentUser.user) return;
-  if (!confirm('参加コードを再発行しますか？再発行前のコードは無効になります。')) return;
+  if (!(await showInPageConfirm('参加コードを再発行しますか？再発行前のコードは無効になります。'))) return;
   classItem.joinCode = `join_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   await dbPut('classes', classItem);
   await loadClasses();
@@ -1301,7 +1323,7 @@ async function removeStudentFromClass(classId, studentUser) {
   const classItem = await dbGet('classes', classId);
   const student = await dbGet('students', studentUser);
   if (!classItem || classItem.owner !== currentUser.user || !student || student.classId !== classId) return;
-  if (!confirm(`${student.name}をクラスから削除しますか？`)) return;
+  if (!(await showInPageConfirm(`${student.name}をクラスから削除しますか？`))) return;
   student.classId = null;
   student.className = '';
   await dbPut('students', student);
@@ -1333,18 +1355,20 @@ async function createStudentAccountManual() {
     return;
   }
   const user = document.getElementById('manual-student-id').value.trim();
+  const attendanceNumber = document.getElementById('manual-student-attendance-number').value.trim();
   const name = document.getElementById('manual-student-name').value.trim();
   const pass = normalizeBirthday(document.getElementById('manual-student-birthday').value);
-  if (!user || !name || !pass) {
-    alert('学籍番号、氏名、誕生日をすべて入力してください。');
+  if (!user || !attendanceNumber || !name || !pass || Number(attendanceNumber) < 1) {
+    alert('出席番号、学籍番号、氏名、誕生日をすべて正しく入力してください。');
     return;
   }
   if (await dbGet('students', user) || await dbGet('admins', user)) {
     alert('その学籍番号は既に使用されています。');
     return;
   }
-  await dbPut('students', { user, name, pass, classId: null, className: '', school: currentUser.school || null });
+  await dbPut('students', { user, attendanceNumber: Number(attendanceNumber), rosterOrder: Date.now(), name, pass, classId: null, className: '', school: currentUser.school || null });
   document.getElementById('manual-student-id').value = '';
+  document.getElementById('manual-student-attendance-number').value = '';
   document.getElementById('manual-student-name').value = '';
   document.getElementById('manual-student-birthday').value = '';
   await loadStudents();
@@ -1377,20 +1401,22 @@ async function importStudentRoster() {
 
   const findColumn = (row, names) => Object.keys(row).find(key => names.includes(String(key).trim()));
   const idColumn = findColumn(rows[0], ['学籍番号', '学籍番号（ID）', 'ID', 'studentId']);
+  const attendanceColumn = findColumn(rows[0], ['出席番号', '出席No', '出席No.', 'attendanceNumber', 'attendance']);
   const nameColumn = findColumn(rows[0], ['氏名', '生徒名', '名前', 'name']);
   const birthdayColumn = findColumn(rows[0], ['誕生日', '生年月日', 'birthday']);
-  if (!idColumn || !nameColumn || !birthdayColumn) {
-    alert('名簿の列名に「学籍番号」「氏名」「誕生日」を指定してください。');
+  if (!attendanceColumn || !idColumn || !nameColumn || !birthdayColumn) {
+    alert('名簿の列名に「出席番号」「学籍番号」「氏名」「誕生日」を指定してください。');
     return;
   }
 
   let created = 0;
   let skipped = 0;
-  for (const row of rows) {
+  for (const [rosterOrder, row] of rows.entries()) {
+    const attendanceNumber = String(row[attendanceColumn]).trim();
     const user = String(row[idColumn]).trim();
     const name = String(row[nameColumn]).trim();
     const pass = normalizeBirthday(row[birthdayColumn]);
-    if (!user || !name || !pass) {
+    if (!attendanceNumber || Number(attendanceNumber) < 1 || !user || !name || !pass) {
       skipped++;
       continue;
     }
@@ -1398,7 +1424,7 @@ async function importStudentRoster() {
       skipped++;
       continue;
     }
-    await dbPut('students', { user, name, pass, classId: null, className: '', school: currentUser.school || null });
+    await dbPut('students', { user, attendanceNumber: Number(attendanceNumber), rosterOrder, name, pass, classId: null, className: '', school: currentUser.school || null });
     created++;
   }
   document.getElementById('student-roster-file').value = '';
@@ -1419,7 +1445,7 @@ async function inviteStudentToClass(classId) {
     alert('自分が作成したクラスだけ操作できます。');
     return;
   }
-  const user = prompt('生徒IDを入力してください。');
+  const user = await showInPagePrompt('生徒IDを入力してください。');
   if (!user) return;
   const student = await dbGet('students', user);
   if (!student) {
@@ -1438,7 +1464,47 @@ async function inviteStudentToClass(classId) {
 async function loadStudents() {
   if (!currentUser || currentUser.role !== 'schoolAdmin') return;
   const students = (await dbGetAll('students')).filter(student => !student.school || student.school === currentUser.school);
-  document.getElementById('student-account-list').innerHTML = students.length ? students.map(student => `<div class="card"><strong>${student.name}</strong>（ID: ${student.user}）<br><small>${student.className ? `所属クラス: ${student.className}` : '未所属'}</small></div>`).join('') : '<p>生徒アカウントはありません。</p>';
+  document.getElementById('student-account-list').innerHTML = students.length ? students.map(student => `<div class="card"><strong>${student.name}</strong>（ID: ${student.user}）<br><small>出席番号: ${student.attendanceNumber ?? '未登録'} / ${student.className ? `所属クラス: ${student.className}` : '未所属'}</small><br><button class="btn btn-secondary" onclick="editStudentAccount('${student.user}')">氏名・出席番号を編集</button><button class="btn btn-danger" onclick="deleteStudentAccount('${student.user}')">退学者のアカウントを削除</button></div>`).join('') : '<p>生徒アカウントはありません。</p>';
+}
+
+async function editStudentAccount(studentUser) {
+  if (!currentUser || currentUser.role !== 'schoolAdmin') {
+    alert('生徒情報を編集できる権限がありません。');
+    return;
+  }
+  const student = await dbGet('students', studentUser);
+  if (!student || student.school && student.school !== currentUser.school) return;
+
+  const name = await showInPagePrompt('氏名を入力してください。', student.name || '');
+  if (name === null) return;
+  const nextName = name.trim();
+  const attendance = await showInPagePrompt('出席番号を入力してください。', student.attendanceNumber ?? '');
+  if (attendance === null) return;
+  const attendanceNumber = Number(attendance.trim());
+  if (!nextName || !Number.isInteger(attendanceNumber) || attendanceNumber < 1) {
+    alert('氏名と1以上の整数の出席番号を入力してください。');
+    return;
+  }
+
+  student.name = nextName;
+  student.attendanceNumber = attendanceNumber;
+  await dbPut('students', student);
+  await loadStudents();
+  alert('生徒情報を更新しました。');
+}
+
+async function deleteStudentAccount(studentUser) {
+  if (!currentUser || currentUser.role !== 'schoolAdmin') {
+    alert('生徒アカウントを削除できる権限がありません。');
+    return;
+  }
+  const student = await dbGet('students', studentUser);
+  if (!student || student.school && student.school !== currentUser.school) return;
+  if (!(await showInPageConfirm(`退学者「${student.name}（${student.user}）」の生徒アカウントを削除しますか？受験履歴は残ります。`))) return;
+
+  await dbDelete('students', studentUser);
+  await loadStudents();
+  alert('生徒アカウントを削除しました。');
 }
 
 async function saveTest() {
@@ -1574,7 +1640,7 @@ async function deleteTest(testId) {
     alert('管理者アカウントはテストを削除できません。');
     return;
   }
-  if (!confirm('このテストおよび登録済みの問題を削除してもよろしいですか？')) return;
+  if (!(await showInPageConfirm('このテストおよび登録済みの問題を削除してもよろしいですか？'))) return;
   await dbDelete('tests', testId);
   loadTestList();
 }
@@ -1609,7 +1675,22 @@ async function renderResults() {
 
   area.classList.remove('hidden');
   const allAnswers = await dbGetAll('answers');
-  const results = allAnswers.filter(a => a.testId === testId);
+  const students = await dbGetAll('students');
+  const studentMap = new Map(students.map(student => [student.user, student]));
+  const results = allAnswers.filter(a => a.testId === testId).sort((left, right) => {
+    const leftStudent = studentMap.get(left.studentUser);
+    const rightStudent = studentMap.get(right.studentUser);
+    const leftAttendance = Number(leftStudent?.attendanceNumber);
+    const rightAttendance = Number(rightStudent?.attendanceNumber);
+    const hasLeftAttendance = Number.isFinite(leftAttendance) && leftAttendance > 0;
+    const hasRightAttendance = Number.isFinite(rightAttendance) && rightAttendance > 0;
+    if (hasLeftAttendance && hasRightAttendance && leftAttendance !== rightAttendance) return leftAttendance - rightAttendance;
+    if (hasLeftAttendance !== hasRightAttendance) return hasLeftAttendance ? -1 : 1;
+    const leftOrder = Number(leftStudent?.rosterOrder);
+    const rightOrder = Number(rightStudent?.rosterOrder);
+    if (Number.isFinite(leftOrder) && Number.isFinite(rightOrder) && leftOrder !== rightOrder) return leftOrder - rightOrder;
+    return String(left.studentName || '').localeCompare(String(right.studentName || ''), 'ja');
+  });
   const publicationButton = document.getElementById('score-publication-button');
   if (publicationButton) {
     const isPublished = results.length > 0 && results.every(answer => answer.scorePublished);
@@ -1655,6 +1736,7 @@ async function renderResults() {
       <table>
         <thead>
           <tr>
+            <th>出席番号</th>
             <th>学年・クラス・番号</th>
             <th>氏名</th>
             <th>得点</th>
@@ -1665,11 +1747,12 @@ async function renderResults() {
         <tbody>
           ${results.map(r => `
             <tr>
+              <td>${studentMap.get(r.studentUser)?.attendanceNumber ?? '-'}</td>
               <td>${r.studentClass}</td>
               <td>${r.studentName}</td>
               <td><strong>${r.score === null ? '未採点' : r.score}</strong> / ${r.maxScore}</td>
               <td style="${r.violations > 0 ? 'color:var(--danger); font-weight:bold;' : ''}">${r.violations} 回</td>
-              <td>${r.submittedAt}<br><button class="btn btn-secondary" onclick="showStudentAnswers(${r.id}, '${testId}')">解答を確認</button></td>
+              <td>${r.submittedAt}<br><button id="show-answers-${r.id}" class="btn btn-secondary" onclick="showStudentAnswers(${r.id}, '${testId}')">解答を確認</button></td>
             </tr>
           `).join('')}
         </tbody>
@@ -1682,7 +1765,20 @@ async function renderResults() {
   await renderResetLogs(testId);
 }
 
+async function switchResultTest() {
+  document.querySelectorAll('[id^="answer-detail-"]').forEach(detail => detail.remove());
+  await renderResults();
+}
+
 async function showStudentAnswers(answerId, testId) {
+  const detailId = `answer-detail-${answerId}`;
+  const existingDetail = document.getElementById(detailId);
+  if (existingDetail) {
+    existingDetail.remove();
+    const toggleButton = document.getElementById(`show-answers-${answerId}`);
+    if (toggleButton) toggleButton.innerText = '解答を確認';
+    return;
+  }
   const answer = await dbGet('answers', answerId);
   const test = await dbGet('tests', testId);
   if (!answer || !test) return;
@@ -1691,7 +1787,15 @@ async function showStudentAnswers(answerId, testId) {
     const score = answer.questionScores?.[question.id];
     return `<div class="card"><strong>問${index + 1}. ${question.text}</strong><br>生徒の回答: ${value}<br>正解: ${question.answer}${question.type === 'text' ? `<br><label>採点（0〜1点）</label><input type="number" min="0" max="1" step="0.5" id="grade-${answerId}-${question.id}" value="${score ?? ''}"><button class="btn" onclick="gradeAnswer(${answerId}, '${question.id}', '${testId}')">採点を保存</button>` : `<br>得点: ${score ?? 0}`}</div>`;
   }).join('');
-  document.getElementById('student-results-table').insertAdjacentHTML('afterend', `<div id="answer-detail-${answerId}" class="card"><h4>${answer.studentName}の解答</h4>${rows}</div>`);
+  document.getElementById('student-results-table').insertAdjacentHTML('afterend', `<div id="${detailId}" class="card"><div style="display:flex; justify-content:space-between; align-items:center; gap:12px;"><h4>${answer.studentName}の解答</h4><button class="btn btn-secondary" onclick="closeStudentAnswers(${answerId})">解答を閉じる</button></div>${rows}</div>`);
+  const toggleButton = document.getElementById(`show-answers-${answerId}`);
+  if (toggleButton) toggleButton.innerText = '解答を閉じる';
+}
+
+function closeStudentAnswers(answerId) {
+  document.getElementById(`answer-detail-${answerId}`)?.remove();
+  const toggleButton = document.getElementById(`show-answers-${answerId}`);
+  if (toggleButton) toggleButton.innerText = '解答を確認';
 }
 
 async function gradeAnswer(answerId, questionId, testId) {
@@ -1808,8 +1912,8 @@ async function resetTestResults() {
     return;
   }
 
-  if (!confirm(`【警告】テスト「${test.title}」の成績データ (${targetAnswers.length}件) を削除しますか？`)) return;
-  const confirmText = prompt(`本当に削除する場合は「削除」と入力してください。`);
+  if (!(await showInPageConfirm(`【警告】テスト「${test.title}」の成績データ (${targetAnswers.length}件) を削除しますか？`))) return;
+  const confirmText = await showInPagePrompt('本当に削除する場合は「削除」と入力してください。');
   if (confirmText !== '削除') {
     alert('キャンセルされました。');
     return;
@@ -1938,9 +2042,9 @@ async function editTeacherPermissions(user) {
   const account = await dbGet('admins', user);
   if (!account || account.role !== 'teacher' || account.school !== currentUser.school) return;
   const current = account.permissions || { createTest: true, grade: true, manageClass: true };
-  const createTest = confirm('テスト作成・編集を許可しますか？');
-  const grade = confirm('成績確認・記述採点を許可しますか？');
-  const manageClass = confirm('クラス管理を許可しますか？');
+  const createTest = await showInPageConfirm('テスト作成・編集を許可しますか？');
+  const grade = await showInPageConfirm('成績確認・記述採点を許可しますか？');
+  const manageClass = await showInPageConfirm('クラス管理を許可しますか？');
   account.permissions = { createTest, grade, manageClass };
   await dbPut('admins', account);
   loadTeacherAccounts();
@@ -1958,7 +2062,7 @@ async function deleteTeacher(user) {
     return;
   }
 
-  if (!confirm(`教員アカウント [${user}] を削除しますか？`)) return;
+  if (!(await showInPageConfirm(`教員アカウント [${user}] を削除しますか？`))) return;
   await dbDelete('admins', user);
   loadTeacherAccounts();
 }
